@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools]
+packages = ["hoardy"]
+[project]
+name = "hoardy"
+version = "0.0.1"
+authors = [{ name = "Jan Malakhovski", email = "oxij@oxij.org" }]
+description = "Meta-package for `hoardy` packages"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: System :: Archiving",
+    "Topic :: System :: Archiving :: Backup",
+    "Topic :: System :: Archiving :: Mirroring",
+    "Topic :: System :: Logging",
+    "Topic :: Internet :: Log Analysis",
+    "Operating System :: POSIX",
+    "Environment :: Console",
+]
+keywords = [
+    "archive",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "hoardy-adb",
+    "hoardy-mail",
+    "hoardy-web",
+]
+[project.urls]
+"Homepage" = "https://oxij.org/software/hoardy/"
+"GitHub" = "https://github.com/Own-Data-Privateer/hoardy"
+"Support Development" = "https://oxij.org/#support"
