@@ -1,3 +1,48 @@
+# Table of Contents
+<details><summary>(Click me to see it.)</summary>
+<ul>
+<li><a href="#what-is-hoardy" id="toc-what-is-hoardy">What is <code>hoardy</code>?</a></li>
+<li><a href="#what-can-hoardy-do" id="toc-what-can-hoardy-do">What can <code>hoardy</code> do?</a></li>
+<li><a href="#glossary" id="toc-glossary">Glossary</a></li>
+<li><a href="#quickstart" id="toc-quickstart">Quickstart</a>
+<ul>
+<li><a href="#pre-installation" id="toc-pre-installation">Pre-installation</a></li>
+<li><a href="#installation" id="toc-installation">Installation</a></li>
+</ul></li>
+<li><a href="#quirks-and-bugs" id="toc-quirks-and-bugs">Quirks and Bugs</a>
+<ul>
+<li><a href="#known-issues" id="toc-known-issues">Known Issues</a></li>
+<li><a href="#situations-where-hoardy-deduplicate-could-lose-data" id="toc-situations-where-hoardy-deduplicate-could-lose-data">Situations where <code>hoardy deduplicate</code> could lose data</a></li>
+</ul></li>
+<li><a href="#why-does-hoardy-exists" id="toc-why-does-hoardy-exists">Why does <code>hoardy</code> exists?</a></li>
+<li><a href="#development-history" id="toc-development-history">Development history</a></li>
+<li><a href="#meta" id="toc-meta">Meta</a>
+<ul>
+<li><a href="#changelog" id="toc-changelog">Changelog?</a></li>
+<li><a href="#todo" id="toc-todo">TODO?</a></li>
+<li><a href="#license" id="toc-license">License</a></li>
+<li><a href="#contributing" id="toc-contributing">Contributing</a></li>
+</ul></li>
+<li><a href="#usage" id="toc-usage">Usage</a>
+<ul>
+<li><a href="#hoardy" id="toc-hoardy">hoardy</a>
+<ul>
+<li><a href="#hoardy-index" id="toc-hoardy-index">hoardy index</a></li>
+<li><a href="#hoardy-find" id="toc-hoardy-find">hoardy find</a></li>
+<li><a href="#hoardy-find-duplicates" id="toc-hoardy-find-duplicates">hoardy find-duplicates</a></li>
+<li><a href="#hoardy-deduplicate" id="toc-hoardy-deduplicate">hoardy deduplicate</a></li>
+<li><a href="#hoardy-verify" id="toc-hoardy-verify">hoardy verify</a></li>
+<li><a href="#hoardy-upgrade" id="toc-hoardy-upgrade">hoardy upgrade</a></li>
+</ul></li>
+<li><a href="#examples" id="toc-examples">Examples</a></li>
+</ul></li>
+<li><a href="#development-.test-hoardy.sh---help---wine---fast-default-namepath" id="toc-development-.test-hoardy.sh---help---wine---fast-default-namepath">Development: <code>./test-hoardy.sh [--help] [--wine] [--fast] [default] [(NAME|PATH)]*</code></a>
+<ul>
+<li><a href="#examples-1" id="toc-examples-1">Examples</a></li>
+</ul></li>
+</ul>
+</details>
+
 # What is `hoardy`?
 
 `hoardy` is an tool for digital data hoarding, a Swiss-army-knife-like utility for managing otherwise unmanageable piles of files.
@@ -927,3 +972,23 @@ You don't need to call this explicitly as, normally, database upgrades are compl
   ```
 
   The result would be exactly the same as if you had more RAM and run a single `deduplicate` without those limits.
+
+# Development: `./test-hoardy.sh [--help] [--wine] [--fast] [default] [(NAME|PATH)]*`
+
+Sanity check and test `hoardy` command-line interface.
+
+## Examples
+
+- Run internal tests:
+
+  ```
+  ./test-hoardy.sh default
+  ```
+
+- Run fixed-output tests on a given directory:
+
+  ```
+  ./test-hoardy.sh ~/rarely-changing-path
+  ```
+
+  This will copy the whole contents of that path to `/tmp` first.
