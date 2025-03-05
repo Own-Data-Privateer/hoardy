@@ -292,6 +292,7 @@ while (($# > 0)); do
                 dedupe-hardlink-tree34 \
                 dedupe-delete \
                 collisions \
+                rejects \
                 "$@"
             continue
             ;;
@@ -2157,6 +2158,102 @@ EOF
 
         debug_args=()
         ;;
+
+    rejects)
+        echo "# Testing rejected operations in $tmpdir ..."
+
+        check "dedupe-no-delete-a" tree1 "" self deduplicate --delete test/one test/one <<EOF
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/1\`
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/a2\`
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/b3\`
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/c4\`
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/l1\`
+hoardy:warning: There were 5 warnings!
+EOF
+
+        check "dedupe-no-delete-b" tree1 'ln -s t3hree test/five; touch -h -d "2002-01-01 00:00:00" test/five' self deduplicate --delete test/t3hree/xfour test/five/xfour <<EOF
+hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`t3hree/xfour\`) and #1 (\`t3hree/xfour\`) both contain path \`t3hree/xfour/ghjkl10xyz\`
+hoardy:warning: There was 1 warning!
+# dir diff
++five sym mode 777 mtime [2002-01-01 00:00:00] -> t3hree
+EOF
+        ;;
+
+    super-rejects)
+        echo "# Testing rejected operations requiring super-user permissions in $tmpdir ..."
+
+        mount_bind() {
+            mkdir test/xbind
+            mount --bind test/one test/xbind
+        }
+
+        check "dedupe-no-delete-a" tree1 mount_bind self index test <<EOF
+# dir diff
++xbind ref ==> one
++xbind/1 ref ==> one/1
++xbind/a2 ref ==> one/a2
++xbind/b3 ref ==> one/b3
++xbind/c4 ref ==> one/c4
++xbind/l1 ref ==> one/l1
+EOF
+
+        subcheck self deduplicate --delete test <<EOF
+__ t3hree/l3
+rm t2wo/l2
+
+__ t2wo/d5
+rm one/1
+hoardy:error: \`same_data\` failed: [Errno 2, ENOENT] No such file or directory: xbind/1
+hoardy:error: skipping deduplication: broken target: \`xbind/1\`
+fail xbind/1
+rm t3hree/8x
+rm t3hree/xfour/ghjkl10xyz
+
+__ t2wo/de6z
+rm one/a2
+hoardy:error: \`same_data\` failed: [Errno 2, ENOENT] No such file or directory: xbind/a2
+hoardy:error: skipping deduplication: broken target: \`xbind/a2\`
+fail xbind/a2
+rm t3hree/g9xz
+
+__ t2wo/def7
+rm one/b3
+hoardy:error: \`same_data\` failed: [Errno 2, ENOENT] No such file or directory: xbind/b3
+hoardy:error: skipping deduplication: broken target: \`xbind/b3\`
+fail xbind/b3
+
+__ one/c4
+hoardy:error: skipping deduplication: source and target are different paths for the same inode with \`nlink == 1\`:
+hoardy:error: \`one/c4\`
+hoardy:error: \`xbind/c4\`
+hoardy:error: is this a \`mount --bind\`?
+fail xbind/c4
+
+__ one/l1
+hoardy:error: skipping deduplication: source and target are different paths for the same inode with \`nlink == 1\`:
+hoardy:error: \`one/l1\`
+hoardy:error: \`xbind/l1\`
+hoardy:error: is this a \`mount --bind\`?
+fail xbind/l1
+
+hoardy:error: There were 8 errors!
+# \$? == 1
+# dir diff
+-one/1 reg mode 600 mtime [2001-01-01 00:00:01] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-one/a2 reg mode 600 mtime [2001-01-01 00:00:02] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
+-one/b3 reg mode 600 mtime [2001-01-01 00:00:03] size 8 sha256 83e2772f0ff8340fa4fd262c3bafa5217ec67b79c9ba5e83fb6a09f216ccced7
+-t2wo/l2 sym mode 777 mtime [2000-01-01 00:00:02] -> text 1
+-t3hree/8x reg mode 600 mtime [2001-01-01 00:00:08] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-t3hree/g9xz reg mode 600 mtime [2001-01-01 00:00:09] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
+-t3hree/xfour/ghjkl10xyz reg mode 600 mtime [2001-01-01 00:00:10] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-xbind/1 ref ==> one/1
+-xbind/a2 ref ==> one/a2
+-xbind/b3 ref ==> one/b3
+EOF
+
+        umount "$tmpdir/$current_target/test/xbind"
+        ;;
+
     *)
         echo "# Testing fixed-outputness on $src in $tmpdir ..."
 
