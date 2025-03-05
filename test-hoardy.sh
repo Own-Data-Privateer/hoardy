@@ -31,13 +31,14 @@ EOF
 export PYTHONPATH="$PWD:$PYTHONPATH"
 
 in_wine=
+debug_args=()
 self() {
     local cmd="$1"
     shift
     if [[ -z "$in_wine" ]]; then
-        python3 -m hoardy "$cmd" -d test.db --no-progress "$@"
+        python3 -m hoardy "$cmd" -d test.db --no-progress "${debug_args[@]}" "$@"
     else
-        wine python -m hoardy "$cmd" -d test.db --no-progress "$@"
+        wine python -m hoardy "$cmd" -d test.db --no-progress "${debug_args[@]}" "$@"
     fi
 }
 
@@ -89,6 +90,12 @@ tree1mtime() {
             find . -type l -exec touch -h -d "2010-01-01 00:00:00" {} \;
         )
     done
+}
+
+tree1collide() {
+    tree1
+    mkdir xcollide
+    make_regular xcollide/1 "2001-01-01 00:00:01" "nyanyanya218"
 }
 
 tree2() {
@@ -284,6 +291,7 @@ while (($# > 0)); do
                 dedupe-hardlink-tree2 \
                 dedupe-hardlink-tree34 \
                 dedupe-delete \
+                collisions \
                 "$@"
             continue
             ;;
@@ -2021,6 +2029,134 @@ EOF
         sanity_noop
         ;;
 
+    collisions)
+        echo "# Testing hash collisions in $tmpdir ..."
+
+        debug_args=(--debug-hash-len 1)
+
+        check "find-tree1collide" tree1collide "" self find --porcelain test <<EOF
+90 f one/1
+f3 f one/a2
+83 f one/b3
+ef f one/c4
+6b l one/l1
+90 f t2wo/d5
+f3 f t2wo/de6z
+83 f t2wo/def7
+90 l t2wo/l2
+90 f t3hree/8x
+f3 f t3hree/g9xz
+90 l t3hree/l3
+90 f t3hree/xfour/ghjkl10xyz
+90 f xcollide/1
+EOF
+
+        check "fsck-tree1collide-noop" tree1collide "" self fsck --verbose test <<EOF
+ok one/1
+ok one/a2
+ok one/b3
+ok one/c4
+ok one/l1
+ok t2wo/d5
+ok t2wo/de6z
+ok t2wo/def7
+ok t2wo/l2
+ok t3hree/8x
+ok t3hree/g9xz
+ok t3hree/l3
+ok t3hree/xfour/ghjkl10xyz
+ok xcollide/1
+EOF
+
+        check "deduplicate-tree1collide-a" tree1collide "" self deduplicate --ignore-size test <<EOF
+__ t2wo/def7
+ln one/b3
+
+__ t2wo/de6z
+ln one/a2
+ln t3hree/g9xz
+
+__ t3hree/l3
+ln t2wo/l2
+
+__ t2wo/d5
+ln one/1
+hoardy:error: skipping: collision: sha256 is \`90\` while
+hoardy:error: file   \`t2wo/d5\`
+hoardy:error: is not \`xcollide/1\`
+fail xcollide/1
+ln t3hree/8x
+ln t3hree/xfour/ghjkl10xyz
+
+hoardy:error: There was 1 error!
+# \$? == 1
+# dir diff
+-one/1 reg mode 600 mtime [2001-01-01 00:00:01] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-one/a2 reg mode 600 mtime [2001-01-01 00:00:02] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
+-one/b3 reg mode 600 mtime [2001-01-01 00:00:03] size 8 sha256 83e2772f0ff8340fa4fd262c3bafa5217ec67b79c9ba5e83fb6a09f216ccced7
++one/1 reg mode 600 mtime [2000-01-01 00:00:05] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
++one/a2 reg mode 600 mtime [2000-01-01 00:00:06] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
++one/b3 reg mode 600 mtime [2000-01-01 00:00:07] size 8 sha256 83e2772f0ff8340fa4fd262c3bafa5217ec67b79c9ba5e83fb6a09f216ccced7
+-t2wo/d5 reg mode 600 mtime [2000-01-01 00:00:05] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-t2wo/de6z reg mode 600 mtime [2000-01-01 00:00:06] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
+-t2wo/def7 reg mode 600 mtime [2000-01-01 00:00:07] size 8 sha256 83e2772f0ff8340fa4fd262c3bafa5217ec67b79c9ba5e83fb6a09f216ccced7
+-t2wo/l2 sym mode 777 mtime [2000-01-01 00:00:02] -> text 1
++t2wo/d5 ref ==> one/1
++t2wo/de6z ref ==> one/a2
++t2wo/def7 ref ==> one/b3
++t2wo/l2 sym mode 777 mtime [2000-01-01 00:00:01] -> text 1
+-t3hree/8x reg mode 600 mtime [2001-01-01 00:00:08] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
+-t3hree/g9xz reg mode 600 mtime [2001-01-01 00:00:09] size 7 sha256 f377291a5158a26bcb4e5450e061750693129dc5d912e8e8a0e1cce43b3f5127
+-t3hree/l3 sym mode 777 mtime [2000-01-01 00:00:01] -> text 1
++t3hree/8x ref ==> t2wo/d5
++t3hree/g9xz ref ==> t2wo/de6z
++t3hree/l3 ref ==> t2wo/l2
+-t3hree/xfour/ghjkl10xyz reg mode 600 mtime [2001-01-01 00:00:10] size 6 sha256 900a4469df00ccbfd0c145c6d1e4b7953dd0afafadd7534e3a4019e8d38fc663
++t3hree/xfour/ghjkl10xyz ref ==> t3hree/8x
+EOF
+
+        sanity_noop
+
+        subcheck self find-dupes test <<EOF
+EOF
+
+        subcheck self find-dupes --ignore-size test <<EOF
+one/1
+t2wo/d5
+t3hree/8x
+t3hree/xfour/ghjkl10xyz
+xcollide/1
+
+EOF
+
+        subcheck self find-dupes --min-inodes 1 --min-paths 1 test <<EOF
+one/c4
+
+one/l1
+
+one/b3
+t2wo/def7
+
+one/a2
+t2wo/de6z
+t3hree/g9xz
+
+t2wo/l2
+t3hree/l3
+
+one/1
+t2wo/d5
+t3hree/8x
+t3hree/xfour/ghjkl10xyz
+
+xcollide/1
+
+EOF
+
+        sanity_noop
+
+        debug_args=()
+        ;;
     *)
         echo "# Testing fixed-outputness on $src in $tmpdir ..."
 

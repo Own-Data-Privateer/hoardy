@@ -37,6 +37,7 @@ from gettext import gettext
 
 from kisstdlib import *
 from kisstdlib import argparse_ext as argparse
+from kisstdlib.argparse_ext import SUPPRESS
 from kisstdlib.fs import *
 from kisstdlib.sqlite3_ext import DictSettingsAppDB, Cursor, iter_fetchmany
 from kisstdlib.time import Timestamp
@@ -125,7 +126,7 @@ def get_xattrs(path: str | bytes, /) -> dict[bytes, bytes]:
 inode_hash_cache: dict[tuple[int, int], tuple[bytes, bytes]] = {}
 
 
-def get_sha256(fpath: bytes, fstat: _os.stat_result) -> bytes:
+def get_sha256(fpath: bytes, fstat: _os.stat_result, hash_len: int | None) -> bytes:
     inode = (fstat.st_dev, fstat.st_ino)
     try:
         return inode_hash_cache[inode][1]
@@ -141,6 +142,8 @@ def get_sha256(fpath: bytes, fstat: _os.stat_result) -> bytes:
         sha256 = sha256_symlink(fpath)
     else:
         raise ValueError("bad inode type")
+    if hash_len is not None:
+        sha256 = sha256[:hash_len]
     inode_hash_cache[inode] = (fpath, sha256)
     return sha256
 
@@ -293,6 +296,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     stdout_path = get_stdout_path(cargs)
 
     dry_run: bool = cargs.dry_run
+    hash_len = cargs.hash_len
     checksum = cargs.checksum
     do_verify = False
     do_add: bool = cargs.do_add
@@ -453,7 +457,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
             try:
                 with yes_signals():
-                    sha256 = get_sha256(fpath, fstat)
+                    sha256 = get_sha256(fpath, fstat, hash_len)
             except OSError as exc:
                 error(*on_os_error(skipping_failed_msg, "stat", exc))
                 return
@@ -484,7 +488,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             ):
                 try:
                     with yes_signals():
-                        sha256 = get_sha256(fpath, fstat)
+                        sha256 = get_sha256(fpath, fstat, hash_len)
                 except OSError as exc:
                     error(*on_os_error(skipping_failed_msg, "stat", exc))
                     return
@@ -1350,6 +1354,8 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
 
 def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
+    hash_len = cargs.hash_len
+
     verbosity = cargs.verbosity
     stdout_path = get_stdout_path(cargs)
 
@@ -1419,7 +1425,7 @@ def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                 if must_checksum:
                     try:
                         with yes_signals():
-                            sha256 = get_sha256(fpath, fstat)
+                            sha256 = get_sha256(fpath, fstat, hash_len)
                     except OSError as exc:
                         error(*on_os_error(failed_msg, "hash", exc))
                     else:
@@ -1629,6 +1635,14 @@ def make_argparser(real: bool) -> _t.Any:
             default=None,
             help=_("database file to use; default: `%s` on POSIX, `%s` on Windows")
             % (DB_POSIX, DB_WINDOWS.replace("%", "%%")),
+        )
+        # for hash-collision tests
+        cmd.add_argument(
+            "--debug-hash-len",
+            dest="hash_len",
+            type=int,
+            default=None,
+            help=SUPPRESS,
         )
 
         cmd.add_argument(
