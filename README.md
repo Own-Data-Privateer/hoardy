@@ -28,6 +28,11 @@
 </ul></li>
 <li><a href="#why-does-hoardy-exists" id="toc-why-does-hoardy-exists">Why does <code>hoardy</code> exists?</a></li>
 <li><a href="#development-history" id="toc-development-history">Development history</a></li>
+<li><a href="#alternatives" id="toc-alternatives">Alternatives</a>
+<ul>
+<li><a href="#fdupes-and-jdupes" id="toc-fdupes-and-jdupes"><code>fdupes</code> and <code>jdupes</code></a></li>
+<li><a href="#rhash" id="toc-rhash"><code>RHash</code></a></li>
+</ul></li>
 <li><a href="#meta" id="toc-meta">Meta</a>
 <ul>
 <li><a href="#changelog" id="toc-changelog">Changelog?</a></li>
@@ -86,7 +91,11 @@ See [below](#development-history) for why.
 
   - **delete some of the duplicated files**;
 
-- **verify actual filesystem contents against file metadata and/or hashes previously recorded in its databases**.
+  similarly to what [`fdupes`](https://github.com/adrianlopezroche/fdupes) and [`jdupes`](https://codeberg.org/jbruchon/jdupes) do, but `hoardy` **[won't loose your files, won't loose extended file attributes, won't leave your filesystem in an inconsistent state in case of power failure, is much faster on large inputs, can used even if you have more files than you have RAM to store their metadata, can be run incrementally without degrading the quality of results, ...](#fdupes-and-jdupes)**;
+
+- **verify actual filesystem contents against file metadata and/or hashes previously recorded in its databases**;
+
+  which is similar to what [`RHash`](https://github.com/rhash/RHash) can do, but [`hoardy` is faster on large databases of file records, can verify file metadata, and slightly more convenient to use, but, also, at the moment, `hoardy` only computes and checks `SHA256` hash digests and nothing else](#rhash).
 
 See the ["Alternatives" section](#alternatives) for more info.
 
@@ -405,6 +414,140 @@ The rest is currently a work in progress.
 
 If you'd like all those planned features from the the ["TODO" list](./CHANGELOG.md#todo) and the ["Wishlist"](./doc/design.md#wishlist) to be implemented, [sponsor them](https://oxij.org/#sponsor).
 I suck at multi-tasking and I need to eat, time spent procuring sustenance money takes away huge chunks of time I could be working on [this and other related projects](https://oxij.org/software/).
+
+# Alternatives
+
+## [`fdupes`](https://github.com/adrianlopezroche/fdupes) and [`jdupes`](https://codeberg.org/jbruchon/jdupes)
+
+`fdupes` is the original file deduplication tool.
+It walks given input directories, hashes all files, groups them into potential duplicate groups, then compares the files in each group as binary strings, and then deduplicates the ones that match.
+
+`jdupes` is a fork of `fdupes` that does duplicate discovery more efficiently by hashing as little as possible, which works really well on an SSD or when your files contain very small number of duplicates.
+But in other situations, like with a file hierarchy with tons of duplicated files living on an HDD, it works quite miserably, since it generates a lot of disk `seek`s by doing file comparisons incrementally.
+
+Meanwhile, since the fork, `fdupes` added hashing into an `SQLite` database, similar to what `hoardy` does.
+
+Comparing `hoardy`, `fdupes`, and `jdupes` I notice the following:
+
+- **`hoardy` will not loose your data.**
+
+  `hoardy` will refuse to delete a last known copy of a file, it always checks that at least one copy of content data of each file it processes will still be available after it finishes doing whatever it's doing.
+
+  `fdupes` and `jdupes` will happily delete everything if you ask, and it's quite easy to ask accidentally, literally a single key press.
+
+   Also, they will happily delete your data in some of the situations discussed in ["Frequently Asked Questions"](#frequently-asked-questions), even if you don't ask.
+
+  Yes, usually, they work fine, but I recall restoring data from backups multiple times after using them.
+
+- **Unlike with `jdupes`, filesystem changes done by `hoardy deduplicate` are atomic with respect to power being lost.**
+
+  `hoardy` implements `--hardlink` by `link`ing `source` to a `temp` file near `target`, and then `rename`ing it to the `target`, which, on a journaled filesystem, is atomic.
+  Thus, after a power loss, either the `source` or the `target` will be in place of `target`.
+
+  `jdupes` renames the `target` file to `temp`, `link source target`, and then `rm temp` instead.
+  This is not atomic.
+  Also, it probably does this to improve safety, but it does not actually help, since if the `target` is open by another process, that process can still write into there after the `rename` anyway.
+
+  `fdupes` does not implement `--hardlink` at all.
+
+- **`hoardy` is aware of extended file attributes and won't ignore or loose them**, unless you specifically ask.
+
+  Meanwhile, both `fdupes` and `jdupes` ignore and then usually loose them when deduplicating.
+
+- **`jdupes` re-starts from zero it gets interrupted, while `fdupes` and `hoardy` keep most of the progress on interrupt.**
+
+  `jdupes` has `--softabort` option which helps with this issue somewhat, but it won't help if your machine crashes or loses power in the middle.
+
+  `fdupes` lacks hardlinking support, `jdupes` takes literally months of wall-time to finish on my backups, even with files less that 1 MiB excluded, so both tools essentially unusable for my use case.
+
+  But, if you have a smallish bunch of files sitting on an SSD, like a million or less and you want to deduplicate them once and then never again, like if you are a computer service technician or something, then `jdupes` is probably the best solution then.
+
+  Meanwhile, both `fdupes` and `hoardy index` index all files into a database once, which does take quite a bit of time, but for billion-file hierarchies it takes days, not months, since all those files get accessed linearly.
+  And that process can be interrupted at any time, including with a power loss, without losing most of the progress.
+
+- **Both `fdupes` and `hoardy` can apply incremental updates to already `index`ed hierarchies, which take little time to re-`index`, assuming file sizes and/or `mtime`s change as they should.**
+
+  Except, `hoardy` allows you to optionally tweak its `index` algorithm to save bunch of disk accesses when run on file hierarchies where files only ever get added or removed, but their contents never change, which is common with backup directories, see [`hoardy index --no-update`](#hoardy-index).
+
+  Meanwhile, `fdupes` does not support this latter feature and `jdupes` does not support database indexes at all.
+
+- **`hoardy` can both dump the outputs of `find-dupes --print0` and load them back with `deduplicate --stdin0` allowing you to filter files it would deduplicate easily.**
+
+  With small number of files you can run `xargs -0 fdupes`, `xargs -0 jdupes`, or some such, but for large numbers it won't work.
+
+  The number of inputs you can feed into `hoardy` is limited by your RAM, not by OS command line argument list size limit.
+
+  Neither of `fdupes` or `jdupes` can do this.
+
+- **`hoardy deduplicate` can shard its inputs, allowing it to work with piles of files large enough so that even their metadata alone does not to fit into RAM**.
+
+  Or, you can that feature to run `deduplicate` on duplicate-disjoint self-contained chunks of its database, i.e. "dedupicate me about 1/5 of all duplicates, please, taking slightly more than 1/5 of the time of the whole thing", without degrading the quality of the results.
+
+  I.e., with `fdupes` and `jdupes` you can shard by running them on subsets of your inputs.
+  But then, files shared by different inputs won't be deduplicated between them.
+  In contrast, `hoardy` can do sharding by `SHA256`, which will result in everything being properly deduplicated.
+
+  See [examples](#examples) below.
+
+  Neither of `fdupes` or `jdupes` can do this.
+
+- **Both `fdupes` and `hoardy` are faster than `jdupes` on large inputs, especially on HDDs.**
+
+  Both `fdupes` and `hoardy deduplicate` use indexed hashes to find pretty good approximate sets of potential duplicates very quickly on large inputs and walks the filesystem mostly linearly, which greatly improves performance on an HDD.
+
+  In practice, I have not yet managed to become patient enough for `jdupes` to finish deduplicating my whole backup directory once, and I once left it running for two months.
+
+  Meanwhile, on my backups, `hoardy index` takes a couple of days, while `hoardy deduplicates` takes a couple of weeks of wall time, which can easily be done incrementally with sharding, see [examples](#examples).
+
+  `fdupes` does not support hardlinking, and I'm not motivated enough to copy my whole backup hierarchy and run it, comparing its outputs to `hoardy deduplicate --delete`.
+
+- **Also, with both `fdupes` and `hoardy` re-deduplication will skip re-doing most of the work.**
+
+- **`hoardy deduplicate` is very good at RAM usage.**
+
+  It uses the database to allow a much larger working set to fit into RAM, since it can unload file metadata from RAM and re-load it later from the database again at any moment.
+
+  Also, it pre-computes hash usage counts and then uses them to report progress and evict finished duplicate groups from memory as soon as possible.
+  So, in practice, on very large inputs, it will first eat a ton of memory (which, if it's an issue, can be solved by sharding), but then it will rapidly processes and discards duplicate candidates groups, making all that memory available to other programs rather quickly again.
+
+  Meaning, you can feed it a ton of whole-system backups made with `rsync`spanning decades, and it will work, and it will deduplicate them using reasonable amounts time and memory.
+
+  `fdupes` has the `--immediate` option which performs somewhat similarly, but at the cost of losing all control about which files get deleted.
+  `hoardy` is good by default, without compromises.
+
+  `jdupes` can't do this at all.
+
+- Unlike `fdupes` and `jdupes`, `hoardy find-dupes` reports same-hash+length files as duplicates even if they do not match as binary strings, which might not be what you want.
+
+  Doing this allows `hoardy find-dupes` to compute potential duplicates without touching the indexed file hierarchies at all (when running with its default settings), improving performance greatly.
+
+  On non-malicious files of sufficient size, the default `SHA256` hash function makes hash collisions highly improbable, so it's not really an issue, IMHO.
+  But `fdupes` and `jdupes` are technically better at this.
+
+  `hoardy deduplicate` does check file equality properly before doing anything destructive, similar to `fdupes`/`jdupes`, so hash collisions will not loose your data, but `hoardy find-dupes` will still list such files as duplicates.
+
+In short, `hoardy` implements almost a union of features of both `fdupes` and `jdupes`, with some more useful features on top, but with some little bits missing here and there, but `hoardy` is also **significantly safer to use than either of the other two**.
+
+## [`RHash`](https://github.com/rhash/RHash)
+
+`RHash` is "recursive hasher".
+
+Basically, you give it a list of directories, it outputs `<hash digest> <path>` lines (or similar, it's configurable), then, later, you can verify files against a file consisting of such lines.
+It also has some nice features, like hashing with many hashes simultaneously, skipping of already-hashed files present in the output file, and etc.
+
+Practically speaking, it's usage is very similar to `hoardy index` followed by `hoardy verify`, except
+
+- `RHash` can compute way more hash functions than `hoardy` (at the moment, `hoardy` only ever computes `SHA256`);
+
+- for large indexed file hierarchies `hoardy` is much faster at updating its indexes, since, unlike plain-text files generated by `rhash`, `SQLite` databases can be modified easily and incrementally;
+
+  also, all the similar `index`ing advantages from the previous subsection apply;
+
+- `hoardy verify` can verify both hashes and file metadata;
+
+- `hoardy`'s CLI is more convenient than `RHash`'s CLI, IMHO.
+
+Many years before `hoardy` was born, I was using `RHash` quite extensively (and I remember the original forum it was discussed/developed at, yes).
 
 # Meta
 
