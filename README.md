@@ -3,6 +3,7 @@
 <ul>
 <li><a href="#what-is-hoardy" id="toc-what-is-hoardy">What is <code>hoardy</code>?</a></li>
 <li><a href="#what-can-hoardy-do" id="toc-what-can-hoardy-do">What can <code>hoardy</code> do?</a></li>
+<li><a href="#on-honesty-in-reporting-of-data-loss-issues" id="toc-on-honesty-in-reporting-of-data-loss-issues">On honesty in reporting of data loss issues</a></li>
 <li><a href="#glossary" id="toc-glossary">Glossary</a></li>
 <li><a href="#quickstart" id="toc-quickstart">Quickstart</a>
 <ul>
@@ -13,6 +14,17 @@
 <ul>
 <li><a href="#known-issues" id="toc-known-issues">Known Issues</a></li>
 <li><a href="#situations-where-hoardy-deduplicate-could-lose-data" id="toc-situations-where-hoardy-deduplicate-could-lose-data">Situations where <code>hoardy deduplicate</code> could lose data</a></li>
+</ul></li>
+<li><a href="#frequently-asked-questions" id="toc-frequently-asked-questions">Frequently Asked Questions</a>
+<ul>
+<li><a href="#im-using-fdupesjdupes-now-how-do-i-migrate-to-using-hoardy" id="toc-im-using-fdupesjdupes-now-how-do-i-migrate-to-using-hoardy">I’m using <code>fdupes</code>/<code>jdupes</code> now, how do I migrate to using <code>hoardy</code>?</a></li>
+<li><a href="#i-have-two-identical-files-but-hoardy-deduplicate-does-not-deduplicate-them.-why" id="toc-i-have-two-identical-files-but-hoardy-deduplicate-does-not-deduplicate-them.-why">I have two identical files, but <code>hoardy deduplicate</code> does not deduplicate them. Why?</a></li>
+<li><a href="#what-would-happen-if-i-run-hoardy-deduplicate-with-an-outdated-index-would-hoardy-loose-some-of-my-files-by-wrongly-deduplicating-them" id="toc-what-would-happen-if-i-run-hoardy-deduplicate-with-an-outdated-index-would-hoardy-loose-some-of-my-files-by-wrongly-deduplicating-them">What would happen if I run <code>hoardy deduplicate</code> with an outdated index? Would <code>hoardy</code> loose some of my files by wrongly “deduplicating” them?</a></li>
+<li><a href="#i-have-two-files-with-equal-sha256-hash-digests-and-sizes-and-yet-they-are-unequal-when-compared-as-binary-strings.-would-hoardy-deduplicate-them-wrongly" id="toc-i-have-two-files-with-equal-sha256-hash-digests-and-sizes-and-yet-they-are-unequal-when-compared-as-binary-strings.-would-hoardy-deduplicate-them-wrongly">I have two files with equal <code>SHA256</code> hash digests and <code>size</code>s, and yet they are unequal when compared as binary strings. Would <code>hoardy</code> “deduplicate” them wrongly?</a></li>
+<li><a href="#what-would-happen-if-i-run-hoardy-deduplicate---delete-with-the-same-directory-given-in-two-different-arguments-would-it-consider-those-files-to-be-equivalent-to-themselves-and-delete-them-losing-all-my-data" id="toc-what-would-happen-if-i-run-hoardy-deduplicate---delete-with-the-same-directory-given-in-two-different-arguments-would-it-consider-those-files-to-be-equivalent-to-themselves-and-delete-them-losing-all-my-data">What would happen if I run <code>hoardy deduplicate --delete</code> with the same directory given in two different arguments? Would it consider those files to be equivalent to themselves and delete them, losing all my data?</a></li>
+<li><a href="#but-what-if-i-give-the-same-directory-to-hoardy-deduplicate---delete-twice-but-not-as-equivalent-paths-but-by-giving-one-of-them-as-a-symlink-into-an-ancestor-of-the-other-followed-by-their-common-suffix-will-it-loose-my-data-now" id="toc-but-what-if-i-give-the-same-directory-to-hoardy-deduplicate---delete-twice-but-not-as-equivalent-paths-but-by-giving-one-of-them-as-a-symlink-into-an-ancestor-of-the-other-followed-by-their-common-suffix-will-it-loose-my-data-now">But what if I give the same directory to <code>hoardy deduplicate --delete</code> twice, but not as equivalent paths, but by giving one of them as a symlink into an ancestor of the other, followed by their common suffix? Will it loose my data now?</a></li>
+<li><a href="#alright-but-what-if-i-mount---bind-a-directory-to-another-directory-then-hoardy-index-and-run-hoardy-deduplicate---delete-on-both.-the-cloned-directory-will-appear-to-be-exactly-the-same-as-the-original-directory-but-paths-would-be-different-and-there-would-be-no-symlinks-involved.-so-hoardy-deduplicate---delete-would-then-detect-them-as-duplicates-and-would-need-to-delete-all-files-from-one-of-them.-but-deleting-a-file-from-one-will-also-delete-it-from-the-other-ha-finally-surely-it-would-loose-my-data-now" id="toc-alright-but-what-if-i-mount---bind-a-directory-to-another-directory-then-hoardy-index-and-run-hoardy-deduplicate---delete-on-both.-the-cloned-directory-will-appear-to-be-exactly-the-same-as-the-original-directory-but-paths-would-be-different-and-there-would-be-no-symlinks-involved.-so-hoardy-deduplicate---delete-would-then-detect-them-as-duplicates-and-would-need-to-delete-all-files-from-one-of-them.-but-deleting-a-file-from-one-will-also-delete-it-from-the-other-ha-finally-surely-it-would-loose-my-data-now">Alright, but what if I <code>mount --bind</code> a directory to another directory, then <code>hoardy index</code> and run <code>hoardy deduplicate --delete</code> on both. The cloned directory will appear to be exactly the same as the original directory, but paths would be different, and there would be no symlinks involved. So <code>hoardy deduplicate --delete</code> would then detect them as duplicates and would need to delete all files from one of them. But deleting a file from one will also delete it from the other! Ha! Finally! Surely, it would loose my data now?!</a></li>
+<li><a href="#hmm-but-hoardy-deduplicate-implementation-looks-rather-complex.-what-if-a-bug-there-causes-it-to-deduplicate-some-files-that-are-not-actually-duplicates-and-loose-data" id="toc-hmm-but-hoardy-deduplicate-implementation-looks-rather-complex.-what-if-a-bug-there-causes-it-to-deduplicate-some-files-that-are-not-actually-duplicates-and-loose-data">Hmm, but <code>hoardy deduplicate</code> implementation looks rather complex. What if a bug there causes it to “deduplicate” some files that are not actually duplicates and loose data?</a></li>
 </ul></li>
 <li><a href="#why-does-hoardy-exists" id="toc-why-does-hoardy-exists">Why does <code>hoardy</code> exists?</a></li>
 <li><a href="#development-history" id="toc-development-history">Development history</a></li>
@@ -77,6 +89,28 @@ See [below](#development-history) for why.
 - **verify actual filesystem contents against file metadata and/or hashes previously recorded in its databases**.
 
 See the ["Alternatives" section](#alternatives) for more info.
+
+# On honesty in reporting of data loss issues
+
+This document mentions **data loss** and situations when it could occur, repeatedly.
+I realize that this may turn some people off.
+Unfortunately, the reality is that with modern computing it's quite easy to screw things up.
+If a tool can delete or overwrite data, it can loose data.
+Hence, **make backups!**
+
+With that said, **`hoardy` tries its very best to make situations where it causes data loss impossible** by doing a ton of paranoid checks before doing anything destructive.
+Unfortunately, the set of situations where it could lose some data even after doing all those checks **is not empty**.
+Which is why ["Quirks and Bugs" section](#quirks-and-bugs) documents all of those situations known to me.
+(So... Make backups!)
+Meanwhile, ["Frequently Asked Questions"](#frequently-asked-questions), among other things, documents various cases that are handled safely.
+Most of those are quite non-obvious and not recognized by other tools, **which will loose your data where `hoardy` would not**.
+
+**As far as I know, `hoardy` is actually the safest tool for doing what it does**, but this document mentions *data loss* repeatedly, while other tools prefer to be quiet about it.
+I've read the sources of [`hoardy`'s alternatives](#alternatives) to make those comparisons there, and to figure out if I maybe should change how `hoardy` does some things, **and I became much happier with `hoardy`'s internals as a result**.
+Just saying.
+
+Also, should I ever find an issue in `hoardy` that produces loss off data, I commit to fixing and honestly documenting it all immediately, and then adding new tests to the test suite to prevent that issues in the future.
+A promise that can be confirmed by the fact that I did such a thing before for [`hoardy-web` tool, see its `tool-v0.18.1` release](https://oxij.org/software/hoardy-web/tree/master/CHANGELOG.md).
 
 # Glossary
 
@@ -196,6 +230,119 @@ See [`man 7 inode`](https://man7.org/linux/man-pages/man7/inode.7.html) for more
   On Windows, AFAIK, there's no way around this issue at all.
 
   **Thus, you should not `deduplicate` directories with files that change.**
+
+# Frequently Asked Questions
+
+## I'm using `fdupes`/`jdupes` now, how do I migrate to using `hoardy`?
+
+- `hoardy find-dupes` usually produces the same results as `jdupes --recurse --zeromatch --order time`.
+
+- `hoardy deduplicate --hardlink` is a replacement for `jdupes --recurse --zeromatch --permissions --order time --linkhard --noprompt`.
+
+- `hoardy deduplicate --delete` is a replacement for `jdupes --recurse --zeromatch --permissions --order time --hardlinks --delete --noprompt`.
+
+## I have two identical files, but `hoardy deduplicate` does not deduplicate them. Why?
+
+By default, files must match in **everything but timestamps** for `hoardy deduplicate` to consider them to be duplicates.
+
+In comparison, `hoardy find-duplicates` considers everything with equal `SHA256` hash digest and `size`s to be duplicates instead.
+
+It works this way because `hoardy find-duplicates` is designed to inform you of all the potential things you could deduplicate while  `hoardy deduplicate` is designed to preserve all metadata by default (`hoardy deduplicate --hardlink` also preserves the original file `mtime` in the database, so it can be restored later).
+
+If things like file permissions, owners, and groups are not relevant to you, you can run
+
+```
+hoardy deduplicate --ignore-meta path/to/file1 path/to/file2
+```
+
+to deduplicate files that mismatch in those metadata fields.
+(If you want to control this more precisely, see [`deduplicate`'s options](#hoardy-deduplicate).)
+
+If even that does not deduplicate your files, and they are actually equal as binary strings, extended file attributes must be different.
+At the moment, if you are feeling paranoid, you will need to manually do something like
+
+```
+# dump them all
+getfattr --match '.*' --dump path/to/file1 path/to/file2 > attrs.txt
+
+# edit the result so that records of both files match
+$EDITOR attrs.txt
+
+# write them back
+setfattr --restore=attrs.txt
+```
+
+after which `hoardy deduplicate --ignore-meta` would deduplicate them (if they are indeed duplicates).
+
+(Auto-merging of extended attributes, when possible, is on the ["TODO" list](./CHANGELOG.md#todo).)
+
+## What would happen if I run `hoardy deduplicate` with an outdated index? Would `hoardy` loose some of my files by wrongly "deduplicating" them?
+
+No, it would not.
+
+`hoardy` checks that each soon-to-be `deduplicate`d file from its index matches its filesystem counterpart, printing an error and skipping that file and all its apparent duplicates if not.
+
+## I have two files with equal `SHA256` hash digests and `size`s, and yet they are unequal when compared as binary strings. Would `hoardy` "deduplicate" them wrongly?
+
+No, it would not.
+
+`hoardy` checks that source and target inodes have equal data contents before hardlinking them.
+
+## What would happen if I run `hoardy deduplicate --delete` with the same directory given in two different arguments? Would it consider those files to be equivalent to themselves and delete them, losing all my data?
+
+Nope, `hoardy` will notice the same path being processed twice and ignore the second occurrence, printing a warning.
+
+## But what if I give the same directory to `hoardy deduplicate --delete` twice, but not as equivalent paths, but by giving one of them as a symlink into an ancestor of the other, followed by their common suffix? Will it loose my data now?
+
+Nope, `hoardy` will detect this too by resolving all of its inputs first.
+
+## Alright, but what if I `mount --bind` a directory to another directory, then `hoardy index` and run `hoardy deduplicate --delete` on both. The cloned directory will appear to be exactly the same as the original directory, but paths would be different, and there would be no symlinks involved. So `hoardy deduplicate --delete` would then detect them as duplicates and would need to delete all files from one of them. But deleting a file from one will also delete it from the other! Ha! Finally! Surely, it would loose my data now?!
+
+Nope, `hoardy` will detect this and skip all such files too.
+
+Before acting `hoardy deduplicate` checks that if `source` and `target` point to the same file on the same device then it's `nlinks` is not `1`.
+If both `source` and `target` point to the same last copy of a file, it will not be acted upon.
+
+Note that `hoardy` does this check not only in `--delete` mode, but also in `--hardlink` mode, since re-linking them will simply produce useless `link`+`rename` churn and disk IO.
+
+**Actually, if you think about it, this check catches all other possible issues of "removing the last copy of a file when we should not" kind, so all other similar "What if" questions can be answered by "in the worst case, it will be caught by that magic check and at least one copy of the file will persist".**
+And that's the end of that.
+
+As far as I know, `hoardy` is the only tool in existence that handles this properly.
+
+Probably because I'm rare in that I like using `mount --bind`s at `$HOME`.
+(They are useful in places where you'd normally want to hardlink directories, but can't because POSIX disallows it.
+For instance, `vendor/kisstdlib` directory here is a `mount --bind` on my system, so that I could ensure all my projects work with its latest version without fiddling with `git`.)
+And so I want `hoardy` to work even while they are all mounted.
+
+## Hmm, but `hoardy deduplicate` implementation looks rather complex. What if a bug there causes it to "deduplicate" some files that are not actually duplicates and loose data?
+
+Firstly, a healthy habit to have is to simply not trust any one tool to not loose your data, make a backup (including of your backups) before running `hoardy deduplicate` first.
+
+(E.g., if you are feeling very paranoid, you can run `rsync -aHAXiv --link-dest=source source copy` to make a hardlink-copy or `cp -a --reflink=always source copy` to make a reflink-copy first.
+On a modern filesystem these cost very little.
+And you can later remove them to save the space used by inodes, e.g., after you `hoardy verify`ed that nothing is broken.)
+
+Secondly, I'm pretty sure it works fine as `hoardy` has quite a comprehensive test suite for this and is rather well-tested on my backups.
+
+Thirdly, the actual body of `hoardy deduplicate` is written in a rather paranoid way re-verifying all assumptions before attempting to do anything.
+
+Fourthly, by default, `hoardy deduplicate` runs with `--paranoid` option enabled, which checks that source and target have equal contents before doing anything to a pair of supposedly duplicate files, and emits errors if they are not.
+This could be awfully inefficient, true, but in practice it usually does not matter as on a reasonably powerful machine with those files living on an HDD the resulting content re-checks get eaten by IO latency anyway.
+Meanwhile, `--paranoid` prevents data loss even if the rest of the code is completely broken.
+
+With `--no-paranoid` is still checks file content equality, but once per every new inode, not for each pair of paths.
+Eventually `--no-paranoid` will probably become the default (when I stop editing all that code and fearing I would accidentally break something).
+
+Which, by the way, is the reason why `hoardy deduplicate` looks rather complex.
+All those checks are not free.
+
+So, since I'm using this tool extensively myself on my backups which I very much don't want to later restore from their cold backups, I'm pretty paranoid at ensuring it does not loose any data.
+It should be fine.
+
+**That is, I've been using `hoardy` to deduplicate files inside my backup directories, which contain billions of files spanning decades, since at least 2020.**
+
+So far, for me, bugs in `hoardy` caused **zero data loss**.
 
 # <span id="why"/>Why does `hoardy` exists?
 
