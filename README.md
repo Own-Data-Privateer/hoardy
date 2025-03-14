@@ -9,6 +9,9 @@
 <ul>
 <li><a href="#pre-installation" id="toc-pre-installation">Pre-installation</a></li>
 <li><a href="#installation" id="toc-installation">Installation</a></li>
+<li><a href="#deduplicate-files-in-your-downloads" id="toc-deduplicate-files-in-your-downloads">Deduplicate files in your <code>~/Downloads</code></a></li>
+<li><a href="#deduplicate-rsync-snapshots" id="toc-deduplicate-rsync-snapshots">Deduplicate <code>rsync</code> snapshots</a></li>
+<li><a href="#deduplicate-files-in-your-home" id="toc-deduplicate-files-in-your-home">Deduplicate files in your <code>$HOME</code></a></li>
 </ul></li>
 <li><a href="#quirks-and-bugs" id="toc-quirks-and-bugs">Quirks and Bugs</a>
 <ul>
@@ -185,6 +188,170 @@ See [`man 7 inode`](https://man7.org/linux/man-pages/man7/inode.7.html) for more
   ```bash
   nix-shell ./default.nix --arg developer true
   ```
+
+## Deduplicate files in your `~/Downloads`
+
+So, as the simplest use case, deduplicate your `~/Downloads` directory.
+
+Index your `~/Downloads` directory:
+
+```bash
+hoardy index ~/Downloads
+```
+
+Look at the list of duplicated files there:
+
+```bash
+hoardy find-dupes ~/Downloads
+```
+
+**Deduplicate them by hardlinking each duplicate file to its oldest available duplicate version**, i.e. make all paths pointing to duplicate files point to the oldest available inode among those duplicates:
+
+```bash
+hoardy deduplicate --hardlink ~/Downloads
+# or, equivalently
+hoardy deduplicate ~/Downloads
+```
+
+The following should produce an empty output now:
+
+```bash
+hoardy find-dupes ~/Downloads
+```
+
+If it does not (which is unlikely for `~/Downloads`), then some duplicates have different metadata (permissions, owner, group, extended attributes, etc), which will be discussed below.
+
+By default, both `deduplicate --hardlink` and `find-dupes` run with implied `--min-inodes 2` option.
+Thus, to see paths that point to the same inodes on disk you'll need to run the following instead:
+
+```
+hoardy find-dupes --min-inodes 1 ~/Downloads
+```
+
+**To delete all but the oldest file among duplicates in a given directory, run**
+
+```
+hoardy deduplicate --delete ~/Downloads
+```
+
+in which case `--min-inodes 1` is implied by default.
+
+The result of which could, of course, have been archived by running this last command directly, without doing all of the above except for `index`.
+
+Personally, I have
+
+```
+hoardy index ~/Downloads && hoardy deduplicate --delete ~/Downloads
+```
+
+scheduled in my daily `crontab`, because I frequently re-download files from local servers while developing things (for testing).
+
+Normally, you probably don't need to run it that often.
+
+## Deduplicate `rsync` snapshots
+
+Assuming you have a bunch of directories that were produced by something like
+
+```
+rsync -aHAXivRyy --link-dest=/backup/yesterday /home /backup/today
+```
+
+you can deduplicate them by running
+
+```
+hoardy index /backup
+hoardy deduplicate /backup
+```
+
+(Which will probably take a while.)
+
+**Doing this will deduplicate everything by hardlinking each duplicate file to an inode with the oldest `mtime` while respecting and preserving all file permissions, owners, groups, and `user` extended attributes.**
+If you run it as super-user it will also respect all other extended name-spaces, like ACLs, trusted extended attributes, etc.
+See [`man 7 xattr`](https://man7.org/linux/man-pages/man7/xattr.7.html) for more info.
+
+**But, depending on your setup and wishes, the above might not be what you'd want to run.**
+For instance, personally, I run
+
+```
+hoardy index /backup
+hoardy deduplicate --reverse --ignore-meta /backup
+```
+
+instead.
+
+Doing this hardlinks each duplicate file to an inode with the latest `mtime` (`--reverse`) and ignores all file metadata (but not extended attributes), so that the next
+
+```
+rsync -aHAXivRyy --link-dest=/backup/today /home /backup/tomorrow
+```
+
+could re-use those inodes via `--link-dest` as much as possible again.
+Without those options the next `rsync --link-dest` would instead re-create many of those inodes again, which is not what I want, but your mileage may vary.
+
+Also, even with `--reverse` the original `mtime` of each path will be kept in the `hoardy`'s database so that it could be restored later.
+(Which is pretty cool, right?)
+
+Also, if you have so many files under `/backup` that `deduplicate` does not fit into RAM, you can still run it incrementally (while producing the same deduplicated result) via sharding by `SHA256` hash digest.
+See [examples](#examples) for more info.
+
+## Deduplicate files in your `$HOME`
+
+**Note however, that simply running `hoardy deduplicate` on your whole `$HOME` directory will probably break almost everything**, as many programs depend on file timestamps not moving backwards, use zero-length or similarly short files for various things, overwrite files without copying them first, and expect them to stay as independent inodes.
+Hardlinking different same-data files together on a non-backup filesystem will break all those assumptions.
+
+(If you do screw it up, you can fix it by simply doing `cp -a file file.copy ; mv file.copy file` for each wrongly deduplicated file.)
+
+However, sometimes deduplicating some files under `$HOME` can be quite useful, so `hoardy` implements a fairly safe way to do it semi-automatically.
+
+Index your home directory and generate a list of all duplicated files, matched strictly, like `deduplicate` would do:
+
+```bash
+hoardy index ~
+hoardy find-dupes --print0 --match-meta ~ > dupes.print0
+```
+
+`--print0` is needed here because otherwise file names with newlines and/or weird symbols in them could be parsed as multiple separate paths and/or mangled.
+By default, without `--print0`, `hoardy` solves this by escaping control characters in its outputs, and, in theory, it could then allow to read back its own outputs using that format.
+But normal UNIX tools won't be able to use them, hence `--print0`, which is almost universally supported.
+
+You can then easily view the resulting file from a terminal with:
+
+```bash
+cat dupes.print0 | tr '\0' '\n' | less
+```
+
+which, if none of the paths have control symbols in them, will be equivalent to the output of:
+
+```bash
+hoardy find-dupes --match-meta ~ | less
+```
+
+But you can now use `grep` or another similar tool to filter those outputs.
+
+Say, for example, you want to deduplicate `git` objects across different repositories:
+
+```bash
+grep -zP '/\.git/objects/([0-9a-f]{2}|pack)/' dupes.print0 > git-objects.print0
+cat git-objects.print0 | tr '\0' '\n' | less
+```
+
+These are never modified, as so they can be hardlinked together.
+In fact, `git` does this silently when it notices, so you might not get a lot of duplicates there, especially if you mostly clone local repositories from each other.
+But if you have several related repositories cloned from external sources at `$HOME`, the above output, most likely, will not be empty.
+
+So, you can now pretend to deduplicate all of those files:
+
+```bash
+hoardy deduplicate --dry-run --stdin0 < git-objects.print0
+```
+
+and then actually do it:
+
+```bash
+hoardy deduplicate --stdin0 < git-objects.print0
+```
+
+Ta-da! More disk space! For free!
 
 # Quirks and Bugs
 
