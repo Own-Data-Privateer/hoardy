@@ -8,7 +8,7 @@ with pkgs.python3Packages;
 
 buildPythonApplication (rec {
   pname = "hoardy";
-  version = "0.0.1";
+  version = "0.1.0";
   format = "pyproject";
 
   src = lib.cleanSourceWith {

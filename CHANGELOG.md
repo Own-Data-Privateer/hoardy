@@ -6,12 +6,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 Also, at the bottom of this file there is a [TODO list](#todo) with planned future changes.
 
+## [v0.1.0] - 2025-03-17
+
+### Added
+
+- Published a minimal valuable version.
+
+### Removed
+
+- Removed the stub.
+
 ## [v0.0.1] - 2024-09-04
 
 ### Added
 
 - Initial stub.
 
+[v0.1.0]: https://github.com/Own-Data-Privateer/hoardy/compare/v0.0.1...v0.1.0
 [v0.0.1]: https://github.com/Own-Data-Privateer/hoardy/releases/tag/v0.0.1
 
 # TODO

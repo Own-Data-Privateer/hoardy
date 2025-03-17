@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 packages = ["hoardy"]
 [project]
 name = "hoardy"
-version = "0.0.1"
+version = "0.1.0"
 authors = [{ name = "Jan Malakhovski", email = "oxij@oxij.org" }]
 description = "Find files matching given criteria quickly, find duplicated files and deduplicate them, record file hashes and verify them, etc."
 readme = "README.md"
