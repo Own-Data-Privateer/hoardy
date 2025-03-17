@@ -1040,6 +1040,10 @@ With spacing of `2` (a single `--spaced`) a new line also gets printed after eac
   - `--ignore-xattrs`
   : ... regardless of extended file attributes; default
 
+- sharding:
+  - `--shard SHARDS|FROM/SHARDS|FROM/TO/SHARDS`
+  : split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard
+
 - `--order-*` defaults:
   - `--order {mtime,argno,abspath,dirname,basename}`
   : set all `--order-*` option defaults to the given value, except specifying `--order mtime` will set the default `--order-paths` to `argno` instead (since all of the paths belonging to the same `inode` have the same `mtime`); default: `mtime`
@@ -1208,6 +1212,10 @@ Each processed `path` gets prefixed by:
   : ... have the same extended file attributes; default
   - `--ignore-xattrs`
   : ... regardless of extended file attributes
+
+- sharding:
+  - `--shard SHARDS|FROM/SHARDS|FROM/TO/SHARDS`
+  : split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard
 
 - `--order-*` defaults:
   - `--order {mtime,argno,abspath,dirname,basename}`
@@ -1411,24 +1419,47 @@ You don't need to call this explicitly as, normally, database upgrades are compl
   hoardy deduplicate --size-geq 1024 --ignore-meta --reverse --order-inodes abspath /backup
   ```
 
-- When you have enough indexed files that a run of `find-duplicates` or `deduplicate` stops fitting into RAM, you can shard inputs by file size or hash:
+- When you have enough indexed files that a run of `find-duplicates` or `deduplicate` stops fitting into RAM, you can process your database piecemeal by sharding by `SHA256` hash digests:
+  ```
+  # shard the database into 4 pieces and then process each piece separately
+  hoardy find-dupes --shard 4 /backup
+  hoardy deduplicate --shard 4 /backup
+
+  # assuming the previous command was interrupted in the middle, continue from shard 2 of 4
+  hoardy deduplicate --shard 2/4 /backup
+
+  # shard the database into 4 pieces, but only process the first one of them
+  hoardy deduplicate --shard 1/1/4 /backup
+
+  # uncertain amounts of time later...
+
+  # process pieces 2 and 3
+  hoardy deduplicate --shard 2/3/4 /backup
+
+  # uncertain amounts of time later...
+
+  # process piece 4
+  hoardy deduplicate --shard 4/4 /backup
+  ```
+
+  With `--shard SHARDS` set, `hoardy` takes about `1/SHARDS` amount of RAM, but produces exactly the same result as if you had enough RAM to run it with the default `--shard 1`, except it prints/deduplicates duplicate file groups in pseudo-randomly different order and trades RAM usage for longer total run time.
+
+- Alternatively, you can shard the database manually with filters:
   ```
   # deduplicate files larger than 100 MiB
-  hoardy deduplicate --size-geq 104857600 --ignore-meta /backup
+  hoardy deduplicate --size-geq 104857600 /backup
   # deduplicate files between 1 and 100 MiB
-  hoardy deduplicate --size-geq 1048576 --size-leq 104857600 --ignore-meta /backup
-  # deduplicate files between 64 bytes and 1 MiB
-  hoardy deduplicate --size-geq 64 --size-leq 1048576 --ignore-meta /backup
-  # deduplicate the rest
-  hoardy deduplicate --size-leq 64 --ignore-meta /backup
+  hoardy deduplicate --size-geq 1048576 --size-leq 104857600 /backup
+  # deduplicate files between 16 bytes and 1 MiB
+  hoardy deduplicate --size-geq 16 --size-leq 1048576 /backup
 
   # deduplicate about half of the files
-  hoardy deduplicate --sha256-leq 7f --ignore-meta /backup
+  hoardy deduplicate --sha256-leq 7f /backup
   # deduplicate the other half
-  hoardy deduplicate --sha256-geq 80 --ignore-meta /backup
+  hoardy deduplicate --sha256-geq 80 /backup
   ```
 
-  The result would be exactly the same as if you had more RAM and run a single `deduplicate` without those limits.
+  The `--shard` option does something very similar to the latter example.
 
 # Development: `./test-hoardy.sh [--help] [--wine] [--fast] [default] [(NAME|PATH)]*`
 

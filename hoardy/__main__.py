@@ -34,6 +34,7 @@ import typing as _t
 
 from contextlib import contextmanager as _contextmanager
 from gettext import gettext
+from struct import unpack as _unpack
 
 from kisstdlib import *
 from kisstdlib import argparse_ext as argparse
@@ -942,124 +943,142 @@ def iter_duplicate_groups(
 
     # count how many times each statkey appears in the DATABASE
 
-    info("Scanning `DATABASE` for potential duplicates matching given `INPUT`s and criteria...")
+    shards_from, shards_to, shards_total = cargs.shard
+    for shard in range(shards_from - 1, shards_to):
+        sharding = shards_total > 1
+        shard_prefix = gettext("Shard %d/%d:") % (shard + 1, shards_total) + " " if sharding else ""
 
-    paths_total = 0
-    seen_: _c.defaultdict[StatKey, int] = _c.defaultdict(lambda: 0)
-
-    for sql_where, sql_params in iter_input_queries(cargs):
-        raise_first_delayed_signal()
-
-        cur.execute("SELECT sha256, ino_status FROM files WHERE " + sql_where, sql_params)
-        for old_sha256, old_mode in cur:
-            raise_first_delayed_signal()
-
-            paths_total += 1
-            statkey = fmode_to_type(old_mode).encode("ascii") + old_sha256
-            seen_[statkey] = seen_[statkey] + 1
-
-    # re-create, only keeping the ones that duplicate needed number of times
-    #
-    # this is done to save RAM when processing a ton of statkeys
-
-    seen: dict[StatKey, int] = {}
-
-    while seen_:
-        statkey, statkey_seen = seen_.popitem()
-        if statkey_seen >= min_uses:
-            seen[statkey] = statkey_seen
-    del seen_
-
-    statkeys_total = len(seen)
-    if statkeys_total == 0:
-        # no duplicates
-        return
-
-    # walk the DATABASE again and generate duplicate groups
-
-    info("Generating duplicates...")
-
-    statkey_candidates: _c.defaultdict[StatKey, FileInfo] = _c.defaultdict(
-        lambda: _c.defaultdict(list)
-    )
-
-    def forget(statkey: bytes) -> None:
-        del statkey_candidates[statkey]
-        del seen[statkey]
-
-    paths_so_far = statkeys_so_far = 0
-
-    def progress(fpath: bytes) -> None:
         info(
-            "Processing (%d%% %d/%d candidate groups, %d%% %d/%d paths) `%s`...",
-            100 * statkeys_so_far // statkeys_total,
-            statkeys_so_far,
-            statkeys_total,
-            100 * paths_so_far // paths_total,
-            paths_so_far,
-            paths_total,
-            str_path(fpath),
+            shard_prefix
+            + "Scanning `DATABASE` for potential duplicates matching given `INPUT`s and criteria..."
         )
 
-    for argno, (sql_where, sql_params) in enumerate(iter_input_queries(cargs)):
-        raise_first_delayed_signal()
+        paths_total = 0
+        seen_: _c.defaultdict[StatKey, int] = _c.defaultdict(lambda: 0)
 
-        cur.execute(
-            "SELECT path, sha256, size, original_mtime, ino_mtime, ino_status, ino_id FROM files WHERE "
-            + sql_where,
-            sql_params,
-        )
-        for (
-            fpath,
-            old_sha256,
-            old_size,
-            old_orig_mtime_ns,
-            old_over_mtime_ns,
-            old_mode,
-            old_ino,
-        ) in iter_fetchmany(cur):
+        for sql_where, sql_params in iter_input_queries(cargs):
             raise_first_delayed_signal()
 
-            if paths_so_far % 100000 == 0:
-                progress(fpath)
-            paths_so_far += 1
+            cur.execute("SELECT sha256, ino_status FROM files WHERE " + sql_where, sql_params)
+            for old_sha256, old_mode in cur:
+                raise_first_delayed_signal()
 
-            statkey = fmode_to_type(old_mode).encode("ascii") + old_sha256
-            try:
-                statkey_seen = seen[statkey]
-            except KeyError:
-                # not duplicated, done, or errored
-                continue
+                paths_total += 1
 
-            try:
-                old_dev = get_dev(fpath) if match_device else 0
-            except NotADirectoryError:
-                error("aborting candidate group: path's `dirname` is not a directory: `%s`", fpath)
-                forget(statkey)
-                continue
+                if sharding and _unpack("i", old_sha256[:4])[0] % shards_total != shard:
+                    continue
 
-            old_mtime_ns = old_over_mtime_ns if old_over_mtime_ns is not None else old_orig_mtime_ns
+                statkey = fmode_to_type(old_mode).encode("ascii") + old_sha256
+                seen_[statkey] = seen_[statkey] + 1
 
-            filekey = (old_dev, old_ino, old_mode, old_size, old_mtime_ns)
-            candidates = statkey_candidates[statkey]
-            candidates[filekey].append((argno, fpath))
+        # re-create, only keeping the ones that duplicate needed number of times
+        #
+        # this is done to save RAM when processing a ton of statkeys
 
-            statkey_seen -= 1
-            if statkey_seen > 0:
-                # not the last use yet
+        seen: dict[StatKey, int] = {}
+
+        while seen_:
+            statkey, statkey_seen = seen_.popitem()
+            if statkey_seen >= min_uses:
                 seen[statkey] = statkey_seen
-                continue
+        del seen_
 
-            # this is the last use, `candidates` is now complete
-            forget(statkey)
+        statkeys_total = len(seen)
+        if statkeys_total == 0:
+            # no duplicates
+            return
 
-            yield from iter_duplicate_group1(cargs, min_paths, min_inodes, old_sha256, candidates)
+        # walk the DATABASE again and generate duplicate groups
 
-            statkeys_so_far += 1
-            progress(fpath)
+        info(shard_prefix + "Generating duplicates...")
 
-    for statkey in seen:
-        raise RuntimeFailure("BUG: statkey `%s` was forgotten about", statkey.hex())
+        statkey_candidates: _c.defaultdict[StatKey, FileInfo] = _c.defaultdict(
+            lambda: _c.defaultdict(list)
+        )
+
+        def forget(statkey: bytes) -> None:
+            del statkey_candidates[statkey]
+            del seen[statkey]
+
+        paths_so_far = statkeys_so_far = 0
+
+        def progress(fpath: bytes) -> None:
+            info(
+                shard_prefix + "Processing (%d%% %d/%d candidate groups, %d%% %d/%d paths) `%s`...",
+                100 * statkeys_so_far // statkeys_total,
+                statkeys_so_far,
+                statkeys_total,
+                100 * paths_so_far // paths_total,
+                paths_so_far,
+                paths_total,
+                str_path(fpath),
+            )
+
+        for argno, (sql_where, sql_params) in enumerate(iter_input_queries(cargs)):
+            raise_first_delayed_signal()
+
+            cur.execute(
+                "SELECT path, sha256, size, original_mtime, ino_mtime, ino_status, ino_id FROM files WHERE "
+                + sql_where,
+                sql_params,
+            )
+            for (
+                fpath,
+                old_sha256,
+                old_size,
+                old_orig_mtime_ns,
+                old_over_mtime_ns,
+                old_mode,
+                old_ino,
+            ) in iter_fetchmany(cur):
+                raise_first_delayed_signal()
+
+                if paths_so_far % 100000 == 0:
+                    progress(fpath)
+                paths_so_far += 1
+
+                statkey = fmode_to_type(old_mode).encode("ascii") + old_sha256
+                try:
+                    statkey_seen = seen[statkey]
+                except KeyError:
+                    # not duplicated, done, or errored
+                    continue
+
+                try:
+                    old_dev = get_dev(fpath) if match_device else 0
+                except NotADirectoryError:
+                    error(
+                        "aborting candidate group: path's `dirname` is not a directory: `%s`", fpath
+                    )
+                    forget(statkey)
+                    continue
+
+                old_mtime_ns = (
+                    old_over_mtime_ns if old_over_mtime_ns is not None else old_orig_mtime_ns
+                )
+
+                filekey = (old_dev, old_ino, old_mode, old_size, old_mtime_ns)
+                candidates = statkey_candidates[statkey]
+                candidates[filekey].append((argno, fpath))
+
+                statkey_seen -= 1
+                if statkey_seen > 0:
+                    # not the last use yet
+                    seen[statkey] = statkey_seen
+                    continue
+
+                # this is the last use, `candidates` is now complete
+                forget(statkey)
+
+                yield from iter_duplicate_group1(
+                    cargs, min_paths, min_inodes, old_sha256, candidates
+                )
+
+                statkeys_so_far += 1
+                progress(fpath)
+
+        for statkey in seen:
+            raise RuntimeFailure("BUG: statkey `%s` was forgotten about", statkey.hex())
 
 
 def cmd_find_duplicates(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
@@ -1491,23 +1510,44 @@ def add_doc(fmt: argparse.BetterHelpFormatter) -> None:
     fmt.add_code(f"{__prog__} deduplicate --size-geq 1024 --ignore-meta --reverse --order-inodes abspath /backup")
     fmt.end_section()
 
-    fmt.start_section(_("When you have enough indexed files that a run of `find-duplicates` or `deduplicate` stops fitting into RAM, you can shard inputs by file size or hash"))
-    fmt.add_code(f"""
-# deduplicate files larger than 100 MiB
-{__prog__} deduplicate --size-geq 104857600 --ignore-meta /backup
-# deduplicate files between 1 and 100 MiB
-{__prog__} deduplicate --size-geq 1048576 --size-leq 104857600 --ignore-meta /backup
-# deduplicate files between 64 bytes and 1 MiB
-{__prog__} deduplicate --size-geq 64 --size-leq 1048576 --ignore-meta /backup
-# deduplicate the rest
-{__prog__} deduplicate --size-leq 64 --ignore-meta /backup
+    fmt.start_section(_("When you have enough indexed files that a run of `find-duplicates` or `deduplicate` stops fitting into RAM, you can process your database piecemeal by sharding by `SHA256` hash digests"))
+    fmt.add_code(f"""# {_("shard the database into 4 pieces and then process each piece separately")}
+{__prog__} find-dupes --shard 4 /backup
+{__prog__} deduplicate --shard 4 /backup
 
-# deduplicate about half of the files
-{__prog__} deduplicate --sha256-leq 7f --ignore-meta /backup
-# deduplicate the other half
-{__prog__} deduplicate --sha256-geq 80 --ignore-meta /backup
+# {_("assuming the previous command was interrupted in the middle, continue from shard 2 of 4")}
+{__prog__} deduplicate --shard 2/4 /backup
+
+# {_("shard the database into 4 pieces, but only process the first one of them")}
+{__prog__} deduplicate --shard 1/1/4 /backup
+
+# {_("uncertain amounts of time later...")}
+
+# {_("process pieces 2 and 3")}
+{__prog__} deduplicate --shard 2/3/4 /backup
+
+# {_("uncertain amounts of time later...")}
+
+# {_("process piece 4")}
+{__prog__} deduplicate --shard 4/4 /backup
 """)
-    fmt.add_text(_("The result would be exactly the same as if you had more RAM and run a single `deduplicate` without those limits."))
+    fmt.add_text(_("With `--shard SHARDS` set, `hoardy` takes about `1/SHARDS` amount of RAM, but produces exactly the same result as if you had enough RAM to run it with the default `--shard 1`, except it prints/deduplicates duplicate file groups in pseudo-randomly different order and trades RAM usage for longer total run time."))
+    fmt.end_section()
+
+    fmt.start_section(_("Alternatively, you can shard the database manually with filters"))
+    fmt.add_code(f"""# {_("deduplicate files larger than 100 MiB")}
+{__prog__} deduplicate --size-geq 104857600 /backup
+# {_("deduplicate files between 1 and 100 MiB")}
+{__prog__} deduplicate --size-geq 1048576 --size-leq 104857600 /backup
+# {_("deduplicate files between 16 bytes and 1 MiB")}
+{__prog__} deduplicate --size-geq 16 --size-leq 1048576 /backup
+
+# {_("deduplicate about half of the files")}
+{__prog__} deduplicate --sha256-leq 7f /backup
+# {_("deduplicate the other half")}
+{__prog__} deduplicate --sha256-geq 80 /backup
+""")
+    fmt.add_text(_("The `--shard` option does something very similar to the latter example."))
     fmt.end_section()
     # fmt: on
 
@@ -1979,6 +2019,50 @@ def make_argparser(real: bool) -> _t.Any:
             )
             cmd.set_defaults(match_perms=None)
 
+    def parse_shard(x: str) -> tuple[int, int, int]:
+        def fail() -> None:
+            raise CatastrophicFailure(
+                "can't parse `--shard` argument, expected `<int>/<int>/<int>`, `<int>/<int>`, or `<int>`, got: `%s`",
+                x,
+            )
+
+        parts = x.split("/")
+        num_parts = len(parts)
+        if num_parts < 1 or num_parts > 3:
+            fail()
+        try:
+            ints = list(map(int, parts))
+        except ValueError:
+            fail()
+
+        if num_parts == 1:
+            n1 = 1
+            n2 = n3 = ints[0]
+        elif num_parts == 2:
+            n1, n2 = ints
+            n3 = n2
+        else:
+            n1, n2, n3 = ints
+
+        if 0 < n1 <= n2 <= n3:
+            return (n1, n2, n3)
+
+        raise CatastrophicFailure("bad `--shard` argument: `0 < FROM <= TO <= SHARDS` check failed")
+
+    def add_sharding(cmd: _t.Any) -> None:
+        agrp = cmd.add_argument_group("sharding")
+        agrp.add_argument(
+            "--shard",
+            metavar="SHARDS|FROM/SHARDS|FROM/TO/SHARDS",
+            dest="shard",
+            action="store_map",
+            func=parse_shard,
+            default=(1, 1, 1),
+            help=_(
+                "split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard"
+            ),
+        )
+
     if not real:
         add_common(parser)
         add_filter(parser)
@@ -2222,6 +2306,7 @@ With spacing of `2` (a single `--spaced`) a new line also gets printed after eac
             add_input(cmd)
             add_output(cmd, add_spaced=True)
         add_match(cmd, False, strict)
+        add_sharding(cmd)
 
         defgrp = cmd.add_argument_group("`--order-*` defaults")
         defgrp.add_argument(

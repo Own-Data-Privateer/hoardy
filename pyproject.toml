@@ -71,6 +71,7 @@ disable = [
     "inconsistent-return-statements",
     "no-member",
     "possibly-used-before-assignment",
+    "cell-var-from-loop",
 
     # `kisstdlib` uses this
     "raising-format-tuple",
