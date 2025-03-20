@@ -361,30 +361,36 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             updcur.execute("DELETE FROM files WHERE path = ?", (fpath,))
             con.commit_maybe()
 
-    def db_update(dbobj: DBObj | None, fpath: bytes, is_root: bool = False) -> None:
+    def db_update(
+        dbobj: DBObj | None, fpath: bytes, is_dir: bool | None = None, is_root: bool = False
+    ) -> None:
         paths_so_far = Stats.paths_so_far
         if is_root or paths_so_far % 100000 == 0:
             progress(fpath)
         Stats.paths_so_far = paths_so_far + 1
 
-        try:
-            fstat = _os.lstat(fpath)
-        except FileNotFoundError as exc:
-            if is_root:
-                if dbobj is None:
-                    # wasn't in the DATABASE, does not exists now
-                    error(gettext("not found: `%s`"), str_path(fpath))
-                else:
-                    # was in the DATABASE, does not exists now
+        def do_lstat() -> _os.stat_result | None:
+            try:
+                return _os.lstat(fpath)
+            except FileNotFoundError as exc:
+                if dbobj is not None:
+                    # was in the DATABASE, no longer exists
                     db_remove(dbobj, fpath)
-            else:
+                    return None
                 error(*on_os_error(skipping_failed_msg, "stat", exc))
-            return
-        except OSError as exc:
-            error(*on_os_error(skipping_failed_msg, "stat", exc))
-            return
+            except OSError as exc:
+                error(*on_os_error(skipping_failed_msg, "stat", exc))
+            return None
 
-        if _stat.S_ISDIR(fstat.st_mode):
+        fstat: _os.stat_result | None = None
+
+        if is_dir is None:
+            fstat = do_lstat()
+            if fstat is None:
+                return
+            is_dir = _stat.S_ISDIR(fstat.st_mode)
+
+        if is_dir:
             assert is_root
 
             if dbobj is not None:
@@ -410,50 +416,37 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
                 if isinstance(d, tuple):
                     db_obj, fs_obj = d
-                    db_update(db_obj, fs_obj[0])
+                    db_update(db_obj, fs_obj[0], False)
                 elif isinstance(d, Left):
                     db_obj = d.left
                     db_remove(db_obj, db_obj[0])
                 elif isinstance(d, Right):
                     fs_obj = d.right
-                    db_update(None, fs_obj[0])
+                    db_update(None, fs_obj[0], False)
                 else:
                     assert False
             return
 
-        fmode = fstat.st_mode
-
-        if not _stat.S_ISREG(fmode) and not _stat.S_ISLNK(fmode):
-            if dbobj is None:
-                warning(
-                    gettext("skipping: unsupported inode type `%s`: `%s`"),
-                    fmode_to_type(fmode),
-                    str_path(fpath),
-                )
-            else:
-                if do_remove:
-                    warning(
-                        gettext("removing: unsupported inode type `%s`: `%s`"),
-                        fmode_to_type(fmode),
-                        str_path(fpath),
-                    )
-                else:
-                    warning(
-                        gettext(
-                            "`--no-remove`, thus, not removing: unsupported inode type `%s`: `%s`"
-                        ),
-                        fmode_to_type(fmode),
-                        str_path(fpath),
-                    )
-                db_remove(dbobj, fpath)
+        if dbobj is None and not do_add or dbobj is not None and not do_update:
             return
 
+        if fstat is None:
+            fstat = do_lstat()
+            if fstat is None:
+                return
+
+        fmode = fstat.st_mode
         fsize = fstat.st_size
         fmtime_ns = fstat.st_mtime_ns
         fino = fstat.st_ino if record_ino else 0
 
         if dbobj is None:
-            if not do_add:
+            if not _stat.S_ISREG(fmode) and not _stat.S_ISLNK(fmode):
+                warning(
+                    gettext("skipping: unsupported inode type `%s`: `%s`"),
+                    fmode_to_type(fmode),
+                    str_path(fpath),
+                )
                 return
 
             try:
@@ -468,14 +461,22 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                     stdout.write_str(adding_msg)
                     stdout.write_ln(stdout_path(fpath))
 
-            if not dry_run:
-                updcur.execute(
-                    "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (fpath, sha256, fsize, fmtime_ns, None, fmode, fino),
-                )
-                con.commit_maybe()
+            if dry_run:
+                return
+
+            updcur.execute(
+                "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (fpath, sha256, fsize, fmtime_ns, None, fmode, fino),
+            )
+            con.commit_maybe()
         else:
-            if not do_update:
+            if not _stat.S_ISREG(fmode) and not _stat.S_ISLNK(fmode):
+                warning(
+                    gettext("removing: unsupported inode type `%s`: `%s`"),
+                    fmode_to_type(fmode),
+                    str_path(fpath),
+                )
+                db_remove(dbobj, fpath)
                 return
 
             _, old_sha256, old_size, old_orig_mtime_ns, old_over_mtime_ns, old_mode, old_ino = dbobj
@@ -483,9 +484,9 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
             if (
                 checksum
+                or _stat.S_IFMT(old_mode) != _stat.S_IFMT(fmode)
                 or old_size != fsize
                 or old_mtime_ns != fmtime_ns
-                or _stat.S_IFMT(old_mode) != _stat.S_IFMT(fmode)
             ):
                 try:
                     with yes_signals():
@@ -500,27 +501,31 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             over_mtime_ns = fmtime_ns if old_orig_mtime_ns != fmtime_ns else None
 
             if (
-                old_sha256 != sha256
-                or old_size != fsize
-                or old_over_mtime_ns != over_mtime_ns
-                or old_mode != fmode
-                or old_ino != fino
+                old_sha256 == sha256
+                and old_size == fsize
+                and old_over_mtime_ns == over_mtime_ns
+                and old_mode == fmode
+                and old_ino == fino
             ):
-                if do_verify:
-                    error(gettext("verify failed: `%s`"), str_path(fpath))
-                    return
+                return
 
-                if verbosity > 0:
-                    with keep_progress(lhnd):
-                        stdout.write_str(updating_msg)
-                        stdout.write_ln(stdout_path(fpath))
+            if do_verify:
+                error(gettext("verify failed: `%s`"), str_path(fpath))
+                return
 
-                if not dry_run:
-                    updcur.execute(
-                        "REPLACE INTO files VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (fpath, sha256, fsize, old_orig_mtime_ns, over_mtime_ns, fmode, fino),
-                    )
-                    con.commit_maybe()
+            if verbosity > 0:
+                with keep_progress(lhnd):
+                    stdout.write_str(updating_msg)
+                    stdout.write_ln(stdout_path(fpath))
+
+            if dry_run:
+                return
+
+            updcur.execute(
+                "REPLACE INTO files VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (fpath, sha256, fsize, old_orig_mtime_ns, over_mtime_ns, fmode, fino),
+            )
+            con.commit_maybe()
 
     try:
         for root in cargs.inputs:
@@ -530,7 +535,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                 "SELECT path, sha256, size, original_mtime, ino_mtime, ino_status, ino_id FROM files WHERE path = ?",
                 (root,),
             ).fetchone()
-            db_update(root_dbobj, root, True)
+            db_update(root_dbobj, root, None, True)
             Stats.roots_so_far += 1
 
         con.commit()
