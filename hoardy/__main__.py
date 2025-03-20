@@ -83,7 +83,7 @@ skipping_failed_msg = gettext("skipping: `%s` failed: [Errno %d, %s] %s: %s")
 
 
 def on_os_error(msg: str, what: str, exc: OSError) -> tuple[str, str, int, str, str, str]:
-    errno = exc.errno
+    errno = exc.errno or 0
     if errno == _errno.EIO:
         # the disk is dead, stop immediately
         raise exc
@@ -2055,8 +2055,7 @@ def make_argparser(real: bool) -> _t.Any:
             "--shard",
             metavar="SHARDS|FROM/SHARDS|FROM/TO/SHARDS",
             dest="shard",
-            action="store_map",
-            func=parse_shard,
+            type=parse_shard,
             default=(1, 1, 1),
             help=_(
                 "split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard"
