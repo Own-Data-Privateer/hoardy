@@ -40,7 +40,7 @@ from kisstdlib import *
 from kisstdlib import argparse_ext as argparse
 from kisstdlib.argparse_ext import SUPPRESS
 from kisstdlib.fs import *
-from kisstdlib.sqlite3_ext import DictSettingsAppDB, Cursor, iter_fetchmany
+from kisstdlib.sqlite3_ext import DictSettingsAppDB, Cursor, iter_fetchmany, OperationalError
 from kisstdlib.time import Timestamp
 
 __prog__ = "hoardy"
@@ -1317,28 +1317,36 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                         if dry_run:
                             continue
 
-                        if hardlink:
-                            old_orig_mtime_ns = updcur.execute(
-                                "SELECT original_mtime FROM files WHERE path = ?",
-                                (fpath,),
-                            ).fetchone()[0]
+                        try:
+                            if hardlink:
+                                old_orig_mtime_ns = updcur.execute(
+                                    "SELECT original_mtime FROM files WHERE path = ?",
+                                    (fpath,),
+                                ).fetchone()[0]
 
-                            src_mtime_ns = src_inode.mtime_ns
-                            over_mtime_ns = (
-                                src_mtime_ns if old_orig_mtime_ns != src_mtime_ns else None
-                            )
+                                src_mtime_ns = src_inode.mtime_ns
+                                over_mtime_ns = (
+                                    src_mtime_ns if old_orig_mtime_ns != src_mtime_ns else None
+                                )
 
-                            updcur.execute(
-                                "UPDATE files SET ino_mtime = ?, ino_status = ?, ino_id = ? WHERE path = ?",
-                                (
-                                    over_mtime_ns,
-                                    src_inode.mode,
-                                    src_inode.ino,
-                                    fpath,
-                                ),
-                            )
-                        else:
-                            updcur.execute("DELETE FROM files WHERE path = ?", (fpath,))
+                                updcur.execute(
+                                    "UPDATE files SET ino_mtime = ?, ino_status = ?, ino_id = ? WHERE path = ?",
+                                    (
+                                        over_mtime_ns,
+                                        src_inode.mode,
+                                        src_inode.ino,
+                                        fpath,
+                                    ),
+                                )
+                            else:
+                                updcur.execute("DELETE FROM files WHERE path = ?", (fpath,))
+                        except OperationalError as exc:
+                            # TODO: remove this in v4. Currently, this could happen when the index
+                            # and the `DATABASE` are out of sync.
+                            error("%s", str(exc))
+                            say("fail ", inode, fpath, color=ANSIColor.RED)
+                            continue
+
                         num_updates += 1
                     first_fpath = False
                 first_inode = False
