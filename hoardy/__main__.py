@@ -263,7 +263,9 @@ def equal_xattrs(
     return res
 
 
-def iter_input_queries(cargs: _t.Any) -> _t.Iterator[tuple[str, tuple[_t.Any, ...]]]:
+def iter_input_queries(
+    cargs: _t.Any, inputs: _t.Iterable[bytes]
+) -> _t.Iterator[tuple[str, tuple[_t.Any, ...]]]:
     suffix_where = []
     suffix_params = []
 
@@ -281,7 +283,7 @@ def iter_input_queries(cargs: _t.Any) -> _t.Iterator[tuple[str, tuple[_t.Any, ..
         suffix_where.append("sha256 <= ?")
         suffix_params.append(bytes.fromhex(cargs.sha256_leq))
 
-    for fpath in cargs.inputs:
+    for fpath in inputs:
         fprefix = fpath if fpath != b"/" else b""
         sql_where = "(path = ? OR (path > ? AND path < ?))"
         sql_params = [fpath, fprefix + b"/", fprefix + b"0"]
@@ -576,7 +578,7 @@ def cmd_find(cargs: _t.Any, _lhnd: ANSILogHandler) -> None:
     con = DB(cargs.database)
     cur = con.cursor()
 
-    for sql_where, sql_params in iter_input_queries(cargs):
+    for sql_where, sql_params in iter_input_queries(cargs, cargs.inputs):
         cur.execute("SELECT path, sha256, ino_status FROM files WHERE " + sql_where, sql_params)
         for fpath, sha256, fmode in cur:
             raise_first_delayed_signal()
@@ -948,8 +950,6 @@ def iter_duplicate_groups(
     min_uses = min(min_paths, min_inodes)
     match_device: bool = cargs.match_device
 
-    # count how many times each statkey appears in the DATABASE
-
     shards_from, shards_to, shards_total = cargs.shard
     for shard in range(shards_from - 1, shards_to):
         sharding = shards_total > 1
@@ -960,10 +960,16 @@ def iter_duplicate_groups(
             + "Scanning `DATABASE` for potential duplicates matching given `INPUT`s and criteria..."
         )
 
+        # count how many times each statkey appears in the DATABASE
+
         paths_total = 0
         seen_: _c.defaultdict[StatKey, int] = _c.defaultdict(lambda: 0)
 
-        for sql_where, sql_params in iter_input_queries(cargs):
+        # sort inputs first, to make accesses mostly ordered
+        sorted_inputs = cargs.inputs[:]
+        sorted_inputs.sort()
+
+        for sql_where, sql_params in iter_input_queries(cargs, sorted_inputs):
             raise_first_delayed_signal()
 
             cur.execute("SELECT sha256, ino_status FROM files WHERE " + sql_where, sql_params)
@@ -977,6 +983,18 @@ def iter_duplicate_groups(
 
                 statkey = fmode_to_type(old_mode).encode("ascii") + old_sha256
                 seen_[statkey] = seen_[statkey] + 1
+
+        # NB: yes, it will be sorted again at the next shard, but this would save a ton of memory
+        # when using `--stdin0` in the meantime.
+        del sorted_inputs
+
+        # NB: also, yes, the following code processes `inputs` in their given order, not in sorted
+        # order; this is useful when doing
+        #
+        #   hoardy find-dupes --print0 paths > file
+        #   hoardy deduplicate --stdin0 < file
+        #
+        # which will then, essentially, process the inputs batched by hash.
 
         # re-create, only keeping the ones that duplicate needed number of times
         #
@@ -1021,7 +1039,7 @@ def iter_duplicate_groups(
                 str_path(fpath),
             )
 
-        for argno, (sql_where, sql_params) in enumerate(iter_input_queries(cargs)):
+        for argno, (sql_where, sql_params) in enumerate(iter_input_queries(cargs, cargs.inputs)):
             raise_first_delayed_signal()
 
             cur.execute(
@@ -1414,7 +1432,7 @@ def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     paths_so_far = 0
     report_every = 100 if checksum else 100000
 
-    for sql_where, sql_params in iter_input_queries(cargs):
+    for sql_where, sql_params in iter_input_queries(cargs, cargs.inputs):
         cur.execute(
             "SELECT path, sha256, size, original_mtime, ino_mtime, ino_status, ino_id FROM files WHERE "
             + sql_where,
