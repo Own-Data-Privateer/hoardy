@@ -33,6 +33,7 @@ import sys as _sys
 import typing as _t
 
 from contextlib import contextmanager as _contextmanager
+from functools import lru_cache
 from gettext import gettext
 from struct import unpack as _unpack
 
@@ -588,6 +589,7 @@ def cmd_find(cargs: _t.Any, _lhnd: ANSILogHandler) -> None:
 st_dev_stack: list[tuple[bytes, int]] = []
 
 
+@lru_cache(maxsize=1024)
 def get_dev(fpath: bytes) -> int:
     """Get `stat.st_dev` without actually `stat`ting each file by `stat`ting the
     directory stack instead.
