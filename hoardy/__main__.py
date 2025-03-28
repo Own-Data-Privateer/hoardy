@@ -663,7 +663,7 @@ def equal_stat_inode(
 
 
 StatKey = bytes  # = inode type + hash
-# mode, dev, ino, size, mtime
+# dev, ino, mode, size, mtime
 FileKey = tuple[int, int, int, int, int]
 # tuple[argno, path]
 ArgPath = tuple[int, bytes]
@@ -689,65 +689,61 @@ def iter_duplicate_group1(
     key: InodeKey
 
     for (old_dev, old_ino, old_mode, old_size, old_mtime_ns), argpaths in candidates.items():
-        if old_ino != 0:
-            # dev, ino are pecified, use them as-is
-            key = (old_dev, old_ino)
+        for argpath in argpaths:
+            argno, fpath = argpath
+            if old_ino != 0:
+                # ino is specified, use it as-is
+                key = (old_dev, old_ino)
+                old_uid = old_gid = None
+            else:
+                # no ino specified, `stat` and check each given path
+                try:
+                    fstat = _os.lstat(fpath)
+                except OSError as exc:
+                    error(*on_os_error(failed_msg, "stat", exc))
+                    broken = True
+                    continue
+
+                if not equal_stat(wrong_field_error, fpath, fstat, mode=old_mode, size=old_size, mtime_ns=old_mtime_ns):  # fmt: skip
+                    # does not match the `DATABASE` record
+                    broken = True
+                    continue
+
+                old_dev = fstat.st_dev
+                old_ino = fstat.st_ino
+                if old_ino != 0:
+                    # got an actual inode number
+                    #
+                    # NB: this will usually work fine on dynamic-inode
+                    # filesystems, since the above `lstat` and following `link`
+                    # or `unlink`s will be close enough for those inodes to be
+                    # cached. if not, `deduplicate` will simply fail and do
+                    # nothing
+                    key = (old_dev, old_ino)
+                else:
+                    # the filesystem does not support inodes, generate a fake id instead
+                    key = unique
+                    unique += 1
+                old_uid = fstat.st_uid
+                old_gid = fstat.st_gid
+
             try:
                 pinode, pargpaths = inodes[key]
             except KeyError:
-                inode = Inode(old_dev, old_ino, old_mode, old_size, old_mtime_ns)
-                inodes[key] = inode, argpaths
+                inode = Inode(old_dev, old_ino, old_mode, old_size, old_mtime_ns, old_uid, old_gid)  # fmt: skip
+                inodes[key] = inode, [argpath]
             else:
-                for argpath in argpaths:
-                    pargpaths.append(argpath)
+                pargpaths.append(argpath)
+                # (sameInode)
                 if (
                     pinode.mode != old_mode
                     or pinode.size != old_size
                     or pinode.mtime_ns != old_mtime_ns
+                    or pinode.uid != old_uid
+                    or pinode.gid != old_gid
                 ):
                     # different `DATABASE` records disagree
-                    broken = True
-            continue
-
-        # no inode number is specified, `stat` and check each given path
-        for argpath in argpaths:
-            argno, fpath = argpath
-            try:
-                fstat = _os.lstat(fpath)
-            except OSError as exc:
-                error(*on_os_error(failed_msg, "stat", exc))
-                broken = True
-                continue
-
-            if not equal_stat(wrong_field_error, fpath, fstat, mode=old_mode, dev=old_dev, size=old_size, mtime_ns=old_mtime_ns):  # fmt: skip
-                # does not match the `DATABASE` record
-                broken = True
-                continue
-
-            old_ino = fstat.st_ino
-            if old_ino != 0:
-                # got an actual inode number
-                #
-                # NB: this will usually work fine on dynamic-inode
-                # filesystems, since the above `lstat` and following `link`
-                # or `unlink`s will be close enough for those inodes to be
-                # cached. if not, `deduplicate` will simply fail and do
-                # nothing
-                key = (old_dev, old_ino)
-            else:
-                # the filesystem does not support inodes, generate a fake id instead
-                key = unique
-                unique += 1
-
-            try:
-                pinode, pargpaths = inodes[key]
-            except KeyError:
-                inode = Inode(old_dev, old_ino, old_mode, old_size, old_mtime_ns, fstat.st_uid, fstat.st_gid)  # fmt: skip
-                inodes[key] = inode, [argpath]
-            else:
-                pargpaths.append(argpath)
-                if not equal_stat_inode(None, fpath, fstat, pinode):
-                    # (sameInode)
+                    # or
                     # different paths supposedly pointing to the same inode disagree
                     broken = True
 
@@ -972,6 +968,7 @@ def iter_duplicate_groups(
     aborting_dirname_msg = gettext(
         "aborting candidate group: path's `dirname` is not a directory: `%s`"
     )
+    aborting_broken_path_msg = gettext("aborting duplicate group: broken path: `%s`")
 
     min_uses = min(min_paths, min_inodes)
     match_device: bool = cargs.match_device
@@ -1096,6 +1093,11 @@ def iter_duplicate_groups(
                     old_dev = get_dev(fpath) if match_device else 0
                 except NotADirectoryError:
                     error(aborting_dirname_msg, fpath)
+                    forget(statkey)
+                    continue
+                except OSError as exc:
+                    error(*on_os_error(failed_msg, "stat", exc))
+                    error(aborting_broken_path_msg, str_path(fpath))
                     forget(statkey)
                     continue
 
