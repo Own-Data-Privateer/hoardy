@@ -50,6 +50,22 @@ DB_WINDOWS = R"%LOCALAPPDATA%\hoardy\index.db"
 REPORT_SIZE = 64 * MiB
 NANOSECOND = 10**9
 
+# Generic messages
+
+dry_run_msg = gettext("dry-run: (not)") + " "
+processing_path_msg = gettext("Processing `%s`...")
+hashing_path_msg = gettext("Hashing `%s`...")
+
+failed_msg = gettext("`%s` failed: [Errno %d, %s] %s: %s")
+skipping_failed_msg = gettext("skipping: `%s` failed: [Errno %d, %s] %s: %s")
+
+wrong_field_msg = gettext("wrong %s: %s -> %s: `%s`")
+wrong_field_error = partial(error, wrong_field_msg)
+wrong_field_warning = partial(warning, wrong_field_msg)
+
+done_msg = gettext("Done.")
+applying_journal_msg = gettext("Applying the journal to the `DATABASE`...")
+
 
 class DB(DictSettingsAppDB):
     MIN_VERSION = 3
@@ -77,10 +93,6 @@ def get_stdout_path(cargs: _t.Any) -> _t.Callable[[bytes], str | bytes]:
     if cargs.terminator == b"\0":
         return identity
     return str_path
-
-
-failed_msg = gettext("`%s` failed: [Errno %d, %s] %s: %s")
-skipping_failed_msg = gettext("skipping: `%s` failed: [Errno %d, %s] %s: %s")
 
 
 def on_os_error(msg: str, what: str, exc: OSError) -> tuple[str, str, int, str, str, str]:
@@ -136,7 +148,7 @@ def get_sha256(fpath: bytes, fstat: _os.stat_result, hash_len: int | None) -> by
         pass
 
     if fstat.st_size > REPORT_SIZE:
-        info("Hashing `%s`...", str_path(fpath))
+        info(hashing_path_msg, str_path(fpath))
 
     if _stat.S_ISREG(fstat.st_mode):
         sha256 = sha256_file(fpath)
@@ -167,11 +179,6 @@ def fmode_to_type(status: int) -> str:
     if _stat.S_ISLNK(status):
         return "l"
     return "?"
-
-
-wrong_field_msg = gettext("wrong %s: %s -> %s: `%s`")
-wrong_field_error = partial(error, wrong_field_msg)
-wrong_field_warning = partial(warning, wrong_field_msg)
 
 
 def equal_stat(
@@ -299,6 +306,12 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     verbosity = cargs.verbosity
     stdout_path = get_stdout_path(cargs)
 
+    indexing_msg = gettext("Indexing (%d%% %d/%d roots, %d paths) `%s`...")
+    skipping_unsupported_type_msg = gettext("skipping: unsupported inode type `%s`: `%s`")
+    removing_unsupported_type_msg = gettext("removing: unsupported inode type `%s`: `%s`")
+    verify_failed_msg = gettext("verify failed: `%s`")
+    partial_index_msg = gettext("Incomplete indexing.")
+
     dry_run: bool = cargs.dry_run
     hash_len = cargs.hash_len
     checksum = cargs.checksum
@@ -322,13 +335,10 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
     record_ino: bool = cargs.record_ino
 
-    adding_msg = gettext("add") + " "
-    removing_msg = gettext("rm") + " "
-    updating_msg = gettext("update") + " "
-    if dry_run:
-        adding_msg = gettext("dry-run: (not)") + " " + adding_msg
-        removing_msg = gettext("dry-run: (not)") + " " + removing_msg
-        updating_msg = gettext("dry-run: (not)") + " " + updating_msg
+    dry_prefix = dry_run_msg if dry_run else ""
+    adding_msg = dry_prefix + "add "
+    removing_msg = dry_prefix + "rm "
+    updating_msg = dry_prefix + "update "
 
     roots_total = len(cargs.inputs)
 
@@ -339,7 +349,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     def progress(fpath: bytes) -> None:
         roots_so_far = Stats.roots_so_far
         info(
-            "Indexing (%d%% %d/%d roots, %d paths) `%s`...",
+            indexing_msg,
             100 * roots_so_far // roots_total,
             roots_so_far,
             roots_total,
@@ -348,8 +358,8 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
         )
 
     con = DB(cargs.database)
-    updcur = con.cursor()
     cur = con.cursor()
+    updcur = con.cursor()
 
     def db_remove(_dbobj: DBObj | None, fpath: bytes) -> None:
         if not do_remove:
@@ -446,7 +456,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
         if dbobj is None:
             if not _stat.S_ISREG(fmode) and not _stat.S_ISLNK(fmode):
                 warning(
-                    gettext("skipping: unsupported inode type `%s`: `%s`"),
+                    skipping_unsupported_type_msg,
                     fmode_to_type(fmode),
                     str_path(fpath),
                 )
@@ -475,7 +485,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
         else:
             if not _stat.S_ISREG(fmode) and not _stat.S_ISLNK(fmode):
                 warning(
-                    gettext("removing: unsupported inode type `%s`: `%s`"),
+                    removing_unsupported_type_msg,
                     fmode_to_type(fmode),
                     str_path(fpath),
                 )
@@ -513,7 +523,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                 return
 
             if do_verify:
-                error(gettext("verify failed: `%s`"), str_path(fpath))
+                error(verify_failed_msg, str_path(fpath))
                 return
 
             if verbosity > 0:
@@ -530,6 +540,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             )
             con.commit_maybe()
 
+    complete = False
     try:
         for root in cargs.inputs:
             raise_first_delayed_signal()
@@ -542,16 +553,18 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             Stats.roots_so_far += 1
 
         con.commit()
+        complete = True
     except (GentleSignalInterrupt, BrokenPipeError):
-        error("Indexing was interrupted.")
-        info("Commiting partial results...")
         con.commit()
     except BaseException:
         con.rollback()
         raise
-
-    info("Done. Syncing `DATABASE`...")
-    con.close()
+    finally:
+        if complete:
+            info(done_msg + " " + applying_journal_msg)
+        else:
+            error(partial_index_msg)
+            info(applying_journal_msg)
 
 
 def cmd_find(cargs: _t.Any, _lhnd: ANSILogHandler) -> None:
@@ -766,10 +779,11 @@ def iter_duplicate_group1(
                 unique_argpaths.append(argpath)
                 min_argno = min(min_argno, argno)
             else:
+                ignoring_repeated_path_msg = gettext(
+                    "ignoring repeated path: `INPUT`s #%d (`%s`) and #%d (`%s`) both contain path `%s`"
+                )
                 warning(
-                    gettext(
-                        "ignored a repeated path: `INPUT`s #%d (`%s`) and #%d (`%s`) both contain path `%s`"
-                    ),
+                    ignoring_repeated_path_msg,
                     first_argno,
                     str_path(cargs.inputs[first_argno]),
                     argno,
@@ -855,10 +869,10 @@ def iter_duplicate_group1(
     del preres
 
     if broken:
-        error(
-            "aborting candidate group: disagreement in metadata: re-run `index` on the following paths to fix this:\n%s",
-            "\n".join(map(lambda x: str_path(x[1]), unique_argpaths)),
+        aborting_bad_metadata_msg = gettext(
+            "aborting candidate group: disagreement in metadata: re-run `index` on the following paths to fix this:\n%s"
         )
+        error(aborting_bad_metadata_msg, "\n".join(map(lambda x: str_path(x[1]), unique_argpaths)))
         return
 
     if len(res) == 0:
@@ -947,18 +961,27 @@ def iter_duplicate_groups(
 ) -> _t.Iterator[DuplicateGroup]:
     """For each sha256 it gives fsize, and a map from grouped paths matching this key."""
 
+    shard_msg = gettext("Shard %d/%d:")
+    scanning_database_msg = gettext(
+        "Scanning `DATABASE` for potential duplicates matching given `INPUT`s and criteria..."
+    )
+    generating_duplicates_msg = gettext("Generating duplicates...")
+    processing_candidates_msg = gettext(
+        "Processing (%d%% %d/%d candidate groups, %d%% %d/%d paths) `%s`..."
+    )
+    aborting_dirname_msg = gettext(
+        "aborting candidate group: path's `dirname` is not a directory: `%s`"
+    )
+
     min_uses = min(min_paths, min_inodes)
     match_device: bool = cargs.match_device
 
     shards_from, shards_to, shards_total = cargs.shard
     for shard in range(shards_from - 1, shards_to):
         sharding = shards_total > 1
-        shard_prefix = gettext("Shard %d/%d:") % (shard + 1, shards_total) + " " if sharding else ""
+        shard_prefix = shard_msg % (shard + 1, shards_total) + " " if sharding else ""
 
-        info(
-            shard_prefix
-            + "Scanning `DATABASE` for potential duplicates matching given `INPUT`s and criteria..."
-        )
+        info(shard_prefix + scanning_database_msg)
 
         # count how many times each statkey appears in the DATABASE
 
@@ -1015,7 +1038,7 @@ def iter_duplicate_groups(
 
         # walk the DATABASE again and generate duplicate groups
 
-        info(shard_prefix + "Generating duplicates...")
+        info(shard_prefix + generating_duplicates_msg)
 
         statkey_candidates: _c.defaultdict[StatKey, FileInfo] = _c.defaultdict(
             lambda: _c.defaultdict(list)
@@ -1029,7 +1052,7 @@ def iter_duplicate_groups(
 
         def progress(fpath: bytes) -> None:
             info(
-                shard_prefix + "Processing (%d%% %d/%d candidate groups, %d%% %d/%d paths) `%s`...",
+                shard_prefix + processing_candidates_msg,
                 100 * statkeys_so_far // statkeys_total,
                 statkeys_so_far,
                 statkeys_total,
@@ -1072,9 +1095,7 @@ def iter_duplicate_groups(
                 try:
                     old_dev = get_dev(fpath) if match_device else 0
                 except NotADirectoryError:
-                    error(
-                        "aborting candidate group: path's `dirname` is not a directory: `%s`", fpath
-                    )
+                    error(aborting_dirname_msg, fpath)
                     forget(statkey)
                     continue
 
@@ -1156,15 +1177,32 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     spacing = cargs.spacing
     stdout_path = get_stdout_path(cargs)
 
-    dry_run: bool = cargs.dry_run
-    dry_prefix = gettext("dry-run: (not)") + " " if dry_run else ""
-    paranoid = cargs.paranoid
+    skipping_collision_msg = gettext(
+        "skipping: collision: sha256 is `%s` while\nfile   `%s`\nis not `%s`"
+    )
+    skipping_broken_target_msg = gettext("skipping deduplication: broken target: `%s`")
+    skipping_changed_target_msg = gettext(
+        "skipping deduplication: target changed unexpectedly: `%s`"
+    )
+    aborting_broken_source_msg = gettext("aborting duplicate group: broken source: `%s`")
+    aborting_changed_source_msg = gettext(
+        "aborting duplicate group: source changed unexpectedly: `%s`"
+    )
+    skipping_magic_check_msg = gettext(
+        "skipping deduplication: source and target are different paths for the same inode with `nlink == 1`:\n`%s`\n`%s`\nis this a `mount --bind`?"
+    )
+    partial_deduplicate_msg = gettext("Incomplete deduplication.")
 
     hardlink = True
     if cargs.how == "delete":
         hardlink = False
 
     min_inodes = cargs.min_inodes if cargs.min_inodes is not None else (2 if hardlink else 1)
+
+    dry_run: bool = cargs.dry_run
+    syscall = "link" if hardlink else "unlink"
+    action_prefix = (dry_run_msg if dry_run else "") + ("ln " if hardlink else "rm ")
+    paranoid = cargs.paranoid
 
     def say(prefix: str, inode: Inode, fpath: bytes, color: int = ANSIColor.GREEN) -> None:
         stdout.write_str(prefix, color=color)
@@ -1181,9 +1219,9 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     cur = con.cursor()
     updcur = con.cursor()
 
+    num_updates = 0
+    complete = False
     try:
-        num_updates = 0
-
         for sha256, group in iter_duplicate_groups(cargs, cur, cargs.min_paths, min_inodes):
             raise_first_delayed_signal()
 
@@ -1230,9 +1268,7 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                                 and not same_symlink_data(src_fpath, fpath)
                             ):
                                 error(
-                                    gettext(
-                                        "skipping: collision: sha256 is `%s` while\nfile   `%s`\nis not `%s`"
-                                    ),
+                                    skipping_collision_msg,
                                     sha256.hex(),
                                     str_path(src_fpath),
                                     str_path(fpath),
@@ -1242,14 +1278,9 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                         except OSError as exc:
                             error(*on_os_error(failed_msg, "same_data", exc))
                             if exc.filename == fpath:
-                                error(
-                                    "skipping deduplication: broken target: `%s`", str_path(fpath)
-                                )
+                                error(skipping_broken_target_msg, str_path(fpath))
                             else:
-                                error(
-                                    "aborting duplicate group: broken source: `%s`",
-                                    str_path(src_fpath),
-                                )
+                                error(aborting_broken_source_msg, str_path(src_fpath))
                                 src_broken = True
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
@@ -1262,19 +1293,13 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                             src_fstat = _os.lstat(src_fpath)
                         except OSError as exc:
                             error(*on_os_error(failed_msg, "stat", exc))
-                            error(
-                                "aborting duplicate group: broken source: `%s`",
-                                str_path(src_fpath),
-                            )
+                            error(aborting_broken_source_msg, str_path(src_fpath))
                             src_broken = True
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
 
                         if not equal_stat_inode(wrong_field_error, src_fpath, src_fstat, src_inode):
-                            error(
-                                "aborting duplicate group: source changed unexpectedly: `%s`",
-                                str_path(src_fpath),
-                            )
+                            error(aborting_changed_source_msg, str_path(src_fpath))
                             src_broken = True
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
@@ -1284,15 +1309,12 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                             fstat = _os.lstat(fpath)
                         except OSError as exc:
                             error(*on_os_error(failed_msg, "stat", exc))
-                            error("skipping deduplication: broken target: `%s`", str_path(fpath))
+                            error(skipping_broken_target_msg, str_path(fpath))
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
 
                         if not equal_stat_inode(wrong_field_error, fpath, fstat, inode):
-                            error(
-                                "skipping deduplication: target changed unexpectedly: `%s`",
-                                str_path(fpath),
-                            )
+                            error(skipping_changed_target_msg, str_path(fpath))
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
 
@@ -1311,9 +1333,7 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                                 # this happens, for instance, when deduplicating several `mount --bind`
                                 # clones of the same directory
                                 error(
-                                    "skipping deduplication: source and target are different paths for the same inode with `nlink == 1`:\n`%s`\n`%s`\nis this a `mount --bind`?",
-                                    str_path(src_fpath),
-                                    str_path(fpath),
+                                    skipping_magic_check_msg, str_path(src_fpath), str_path(fpath)
                                 )
                                 say("fail ", inode, fpath, color=ANSIColor.RED)
                                 continue
@@ -1325,14 +1345,12 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
                                 else:
                                     atomic_unlink(fpath, sync=sync)
                         except OSError as exc:
-                            syscall = "link" if hardlink else "unlink"
                             error(*on_os_error(failed_msg, syscall, exc))
                             say("fail ", inode, fpath, color=ANSIColor.RED)
                             continue
 
                         if verbosity > -1:
-                            prefix = dry_prefix + ("ln " if hardlink else "rm ")
-                            say(prefix, inode, fpath)
+                            say(action_prefix, inode, fpath)
 
                         if dry_run:
                             continue
@@ -1388,10 +1406,8 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
         if isinstance(sync, DeferredSync):
             sync.flush()
         con.commit()
+        complete = True
     except (GentleSignalInterrupt, BrokenPipeError):
-        error("Deduplication was interrupted.")
-        info("Commiting partial results...")
-
         if isinstance(sync, DeferredSync):
             sync.flush()
         con.commit()
@@ -1400,9 +1416,12 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             sync.clear()
         con.rollback()
         raise
-
-    info("Done. Syncing `DATABASE`...")
-    con.close()
+    finally:
+        if complete:
+            info(done_msg + " " + applying_journal_msg)
+        else:
+            error(partial_deduplicate_msg)
+            info(applying_journal_msg)
 
 
 def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
@@ -1450,7 +1469,7 @@ def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             raise_first_delayed_signal()
 
             if paths_so_far % report_every:
-                info("Processing `%s`...", str_path(fpath))
+                info(processing_path_msg, str_path(fpath))
             paths_so_far += 1
 
             had_problems = False
@@ -1495,13 +1514,13 @@ def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             elif verbosity > 0:
                 say("ok", fpath)
 
-    info("Done.")
+    info(done_msg)
 
 
 def cmd_upgrade(cargs: _t.Any, _lhnd: ANSILogHandler) -> None:
     db = DB(cargs.database, backup_before_upgrades=True)
     db.close()
-    info("Done.")
+    info(done_msg + " " + applying_journal_msg)
 
 
 def add_doc(fmt: argparse.BetterHelpFormatter) -> None:

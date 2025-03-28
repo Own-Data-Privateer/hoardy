@@ -2163,16 +2163,16 @@ EOF
         echo "# Testing rejected operations in $tmpdir ..."
 
         check "dedupe-no-delete-a" tree1 "" self deduplicate --delete test/one test/one <<EOF
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/1\`
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/a2\`
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/b3\`
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/c4\`
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/l1\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/1\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/a2\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/b3\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/c4\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`one\`) and #1 (\`one\`) both contain path \`one/l1\`
 hoardy:warning: There were 5 warnings!
 EOF
 
         check "dedupe-no-delete-b" tree1 'ln -s t3hree test/five; touch -h -d "2002-01-01 00:00:00" test/five' self deduplicate --delete test/t3hree/xfour test/five/xfour <<EOF
-hoardy:warning: ignored a repeated path: \`INPUT\`s #0 (\`t3hree/xfour\`) and #1 (\`t3hree/xfour\`) both contain path \`t3hree/xfour/ghjkl10xyz\`
+hoardy:warning: ignoring repeated path: \`INPUT\`s #0 (\`t3hree/xfour\`) and #1 (\`t3hree/xfour\`) both contain path \`t3hree/xfour/ghjkl10xyz\`
 hoardy:warning: There was 1 warning!
 # dir diff
 +five sym mode 777 mtime [2002-01-01 00:00:00] -> t3hree
