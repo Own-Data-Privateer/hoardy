@@ -1570,14 +1570,20 @@ def add_doc(fmt: argparse.BetterHelpFormatter) -> None:
 {__prog__} deduplicate --shard 4 /backup
 
 # {_("assuming the previous command was interrupted in the middle, continue from shard 2 of 4")}
-{__prog__} deduplicate --shard 2/4 /backup
+{__prog__} deduplicate --shard 2/4/4 /backup
 
 # {_("shard the database into 4 pieces, but only process the first one of them")}
-{__prog__} deduplicate --shard 1/1/4 /backup
+{__prog__} deduplicate --shard 1/4 /backup
 
 # {_("uncertain amounts of time later...")}
+# {_("(possibly, after a reboot)")}
 
-# {_("process pieces 2 and 3")}
+# {_("process piece 2")}
+{__prog__} deduplicate --shard 2/4 /backup
+# {_("then piece 3")}
+{__prog__} deduplicate --shard 3/4 /backup
+
+# {_("or, equivalently, process pieces 2 and 3 one after the other")}
 {__prog__} deduplicate --shard 2/3/4 /backup
 
 # {_("uncertain amounts of time later...")}
@@ -2093,8 +2099,8 @@ def make_argparser(real: bool) -> _t.Any:
             n1 = 1
             n2 = n3 = ints[0]
         elif num_parts == 2:
-            n1, n2 = ints
-            n3 = n2
+            n2, n3 = ints
+            n1 = n2
         else:
             n1, n2, n3 = ints
 
@@ -2107,12 +2113,18 @@ def make_argparser(real: bool) -> _t.Any:
         agrp = cmd.add_argument_group("sharding")
         agrp.add_argument(
             "--shard",
-            metavar="SHARDS|FROM/SHARDS|FROM/TO/SHARDS",
+            metavar="FROM/TO/SHARDS|SHARDS|NUM/SHARDS",
             dest="shard",
             type=parse_shard,
             default=(1, 1, 1),
             help=_(
-                "split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard"
+                """split database into a number of disjoint pieces (shards) and process a range of them:
+
+- with `FROM/TO/SHARDS` specified, split database into `SHARDS` shards and then process those with numbers between `FROM` and `TO` (both including, counting from `1`);
+- with `SHARDS` syntax, interpret it as `1/SHARDS/SHARDS`, thus processing the whole database by splitting it into `SHARDS` pieces first;
+- with `NUM/SHARDS`, interpret it as `NUM/NUM/SHARDS`, thus processing a single shard `NUM` of `SHARDS`;
+- default: `1/1/1`, `1/1`, or just `1`, which processes the whole database as a single shard;
+"""
             ),
         )
 

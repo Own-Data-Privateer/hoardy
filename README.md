@@ -1041,8 +1041,13 @@ With spacing of `2` (a single `--spaced`) a new line also gets printed after eac
   : ... regardless of extended file attributes; default
 
 - sharding:
-  - `--shard SHARDS|FROM/SHARDS|FROM/TO/SHARDS`
-  : split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard
+  - `--shard FROM/TO/SHARDS|SHARDS|NUM/SHARDS`
+  : split database into a number of disjoint pieces (shards) and process a range of them:
+    
+    - with `FROM/TO/SHARDS` specified, split database into `SHARDS` shards and then process those with numbers between `FROM` and `TO` (both including, counting from `1`);
+    - with `SHARDS` syntax, interpret it as `1/SHARDS/SHARDS`, thus processing the whole database by splitting it into `SHARDS` pieces first;
+    - with `NUM/SHARDS`, interpret it as `NUM/NUM/SHARDS`, thus processing a single shard `NUM` of `SHARDS`;
+    - default: `1/1/1`, `1/1`, or just `1`, which processes the whole database as a single shard;
 
 - `--order-*` defaults:
   - `--order {mtime,argno,abspath,dirname,basename}`
@@ -1214,8 +1219,13 @@ Each processed `path` gets prefixed by:
   : ... regardless of extended file attributes
 
 - sharding:
-  - `--shard SHARDS|FROM/SHARDS|FROM/TO/SHARDS`
-  : split database into `SHARDS` of disjoint pieces and process pieces with numbers between `FROM` and `TO`; if `FROM` is unspecified, it defaults to `1`; if `TO` is unspecified, it defaults to `SHARDS`; default: `1`, which is the same as `1/1` and `1/1/1`, which processes the whole database as a single shard
+  - `--shard FROM/TO/SHARDS|SHARDS|NUM/SHARDS`
+  : split database into a number of disjoint pieces (shards) and process a range of them:
+    
+    - with `FROM/TO/SHARDS` specified, split database into `SHARDS` shards and then process those with numbers between `FROM` and `TO` (both including, counting from `1`);
+    - with `SHARDS` syntax, interpret it as `1/SHARDS/SHARDS`, thus processing the whole database by splitting it into `SHARDS` pieces first;
+    - with `NUM/SHARDS`, interpret it as `NUM/NUM/SHARDS`, thus processing a single shard `NUM` of `SHARDS`;
+    - default: `1/1/1`, `1/1`, or just `1`, which processes the whole database as a single shard;
 
 - `--order-*` defaults:
   - `--order {mtime,argno,abspath,dirname,basename}`
@@ -1426,14 +1436,20 @@ You don't need to call this explicitly as, normally, database upgrades are compl
   hoardy deduplicate --shard 4 /backup
 
   # assuming the previous command was interrupted in the middle, continue from shard 2 of 4
-  hoardy deduplicate --shard 2/4 /backup
+  hoardy deduplicate --shard 2/4/4 /backup
 
   # shard the database into 4 pieces, but only process the first one of them
-  hoardy deduplicate --shard 1/1/4 /backup
+  hoardy deduplicate --shard 1/4 /backup
 
   # uncertain amounts of time later...
+  # (possibly, after a reboot)
 
-  # process pieces 2 and 3
+  # process piece 2
+  hoardy deduplicate --shard 2/4 /backup
+  # then piece 3
+  hoardy deduplicate --shard 3/4 /backup
+
+  # or, equivalently, process pieces 2 and 3 one after the other
   hoardy deduplicate --shard 2/3/4 /backup
 
   # uncertain amounts of time later...
