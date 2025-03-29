@@ -270,6 +270,14 @@ def equal_xattrs(
     return res
 
 
+def map_with_realdir(paths: _t.Iterable[bytes]) -> _t.Iterator[bytes]:
+    for path in paths:
+        try:
+            yield realdir(path, strict=True)
+        except OSError as exc:
+            error(*on_os_error(skipping_failed_msg, "readlink", exc))
+
+
 def iter_input_queries(
     cargs: _t.Any, inputs: _t.Iterable[bytes]
 ) -> _t.Iterator[tuple[str, tuple[_t.Any, ...]]]:
@@ -542,7 +550,7 @@ def cmd_index(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
     complete = False
     try:
-        for root in cargs.inputs:
+        for root in chain(cargs.inputs, map_with_realdir(cargs.inputs_stdin0)):
             raise_first_delayed_signal()
 
             root_dbobj = cur.execute(
@@ -591,7 +599,9 @@ def cmd_find(cargs: _t.Any, _lhnd: ANSILogHandler) -> None:
     con = DB(cargs.database)
     cur = con.cursor()
 
-    for sql_where, sql_params in iter_input_queries(cargs, cargs.inputs):
+    for sql_where, sql_params in iter_input_queries(
+        cargs, chain(cargs.inputs, cargs.inputs_stdin0)
+    ):
         cur.execute("SELECT path, sha256, ino_status FROM files WHERE " + sql_where, sql_params)
         for fpath, sha256, fmode in cur:
             raise_first_delayed_signal()
@@ -1134,6 +1144,10 @@ def cmd_find_duplicates(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     spacing = cargs.spacing
     stdout_path = get_stdout_path(cargs)
 
+    # NB: not mapping `--stdin0` with `realdir`
+    cargs.inputs += cargs.inputs_stdin0
+    del cargs.inputs_stdin0
+
     # batch outputs so that `keep_progress` would produce less flicker
     bio = _io.BytesIO()
     wio = TIOWrappedWriter(bio, encoding=stdout.encoding, eol=stdout.eol, ansi=stdout.ansi)
@@ -1178,6 +1192,10 @@ def cmd_deduplicate(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     verbosity = cargs.verbosity + 1
     spacing = cargs.spacing
     stdout_path = get_stdout_path(cargs)
+
+    # NB: not mapping `--stdin0` with `realdir`
+    cargs.inputs += cargs.inputs_stdin0
+    del cargs.inputs_stdin0
 
     skipping_collision_msg = gettext(
         "skipping: collision: sha256 is `%s` while\nfile   `%s`\nis not `%s`"
@@ -1453,7 +1471,9 @@ def cmd_verify(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
     paths_so_far = 0
     report_every = 100 if checksum else 100000
 
-    for sql_where, sql_params in iter_input_queries(cargs, cargs.inputs):
+    for sql_where, sql_params in iter_input_queries(
+        cargs, chain(cargs.inputs, map_with_realdir(cargs.inputs_stdin0))
+    ):
         cur.execute(
             "SELECT path, sha256, size, original_mtime, ino_mtime, ino_status, ino_id FROM files WHERE "
             + sql_where,
@@ -1644,7 +1664,7 @@ def make_argparser(real: bool) -> _t.Any:
             "inputs",
             metavar="INPUT",
             nargs="*",
-            type=str,
+            type=lambda x: _op.expanduser(fsencode(x)),
             help=_("input files and/or directories to process"),
         )
         cmd.add_argument(
@@ -2680,9 +2700,7 @@ def massage(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
 
     if hasattr(cargs, "inputs"):
         try:
-            cargs.inputs = cinputs = [
-                _op.realpath(_op.expanduser(fsencode(a)), strict=True) for a in cargs.inputs if a
-            ]
+            cargs.inputs = [realdir(a, strict=True) for a in cargs.inputs if a]
         except OSError as exc:
             raise CatastrophicFailure(*on_os_error(failed_msg, "readlink", exc)) from exc
 
@@ -2691,16 +2709,11 @@ def massage(cargs: _t.Any, lhnd: ANSILogHandler) -> None:
             last_path = inputs.pop()
             if last_path != b"":
                 raise Failure("`--stdin0` input format error")
-            for path in inputs:
-                if path:
-                    try:
-                        cinputs.append(_op.realpath(path))
-                    except OSError as exc:
-                        raise CatastrophicFailure(
-                            *on_os_error(failed_msg, "readlink", exc)
-                        ) from exc
+            cargs.inputs_stdin0 = [a for a in inputs if a]
+        else:
+            cargs.inputs_stdin0 = []
 
-        if len(cinputs) == 0:
+        if len(cargs.inputs) + len(cargs.inputs_stdin0) == 0:
             warning(gettext("no `INPUT`s"))
 
     if hasattr(cargs, "terminator"):
