@@ -11,7 +11,12 @@
 <li><a href="#installation" id="toc-installation">Installation</a></li>
 <li><a href="#deduplicate-files-in-your-downloads" id="toc-deduplicate-files-in-your-downloads">Deduplicate files in your <code>~/Downloads</code></a></li>
 <li><a href="#deduplicate-rsync-snapshots" id="toc-deduplicate-rsync-snapshots">Deduplicate <code>rsync</code> snapshots</a></li>
-<li><a href="#deduplicate-files-in-your-home" id="toc-deduplicate-files-in-your-home">Deduplicate files in your <code>$HOME</code></a></li>
+<li><a href="#deduplicate-files-in-your-home" id="toc-deduplicate-files-in-your-home">Deduplicate files in your <code>$HOME</code></a>
+<ul>
+<li><a href="#deduplicate-.gitobjects" id="toc-deduplicate-.gitobjects">Deduplicate <code>.git/objects</code></a></li>
+<li><a href="#deduplicate-node_modules" id="toc-deduplicate-node_modules">Deduplicate <code>node_modules</code></a></li>
+<li><a href="#deduplicate-git-worktree-and-other-commonly-duplicated-source-files" id="toc-deduplicate-git-worktree-and-other-commonly-duplicated-source-files">Deduplicate <code>git worktree</code> and other commonly duplicated source files</a></li>
+</ul></li>
 </ul></li>
 <li><a href="#quirks-and-bugs" id="toc-quirks-and-bugs">Quirks and Bugs</a>
 <ul>
@@ -67,7 +72,7 @@
 
 `hoardy` is an tool for digital data hoarding, a Swiss-army-knife-like utility for managing otherwise unmanageable piles of files.
 
-On GNU/Linux, [`hoardy` it pretty well-tested on my files](#why-does-hoardy-exists) and I find it to be an essentially irreplaceable tool for managing the mess of media files in my home directory, backup snapshots made with `rsync`, as well as `git-annex` and `hydrus` file object stores.
+On GNU/Linux, [`hoardy` it pretty well-tested on my files](#why-does-hoardy-exists) and I find it to be an essentially irreplaceable tool for managing duplicated files in related source code trees, media files duplicated between my home directory, [`git-annex`](https://git-annex.branchable.com/), and [`hydrus`](https://github.com/hydrusnetwork/hydrus) file object stores, as well as backup snapshots made with [`rsync`](https://rsync.samba.org/) and [`rsnapshot`](https://rsnapshot.org/).
 
 On Windows, however, `hoardy` is a work in progress essentially unusable alpha software that is completely untested.
 
@@ -328,6 +333,8 @@ hoardy find-dupes --match-meta ~ | less
 
 But you can now use `grep` or another similar tool to filter those outputs.
 
+### Deduplicate `.git/objects`
+
 Say, for example, you want to deduplicate `git` objects across different repositories:
 
 ```bash
@@ -352,6 +359,101 @@ hoardy deduplicate --stdin0 < git-objects.print0
 ```
 
 Ta-da! More disk space! For free!
+
+### Deduplicate `node_modules`
+
+Of course, the above probably won't have deduplicated much.
+However, if you use `npm` lots, then your filesystem is probably chock full of `node_modules` directories full of files that can be deduplicated.
+In fact, [`pnpm`](https://pnpm.io/) tool does this automatically when installing new stuff, but it won't help with the previously installed stuff.
+Whereas `hoardy` can help:
+
+```bash
+grep -zF '/node_modules/' dupes.print0 > node_modules.print0
+cat node_modules.print0 | tr '\0' '\n' | less
+hoardy deduplicate --stdin0 < node_modules.print0
+```
+
+Doing this could save quite a bit of space, since `nodejs` packages tend to duplicate everything dozens of times.
+
+### Deduplicate `git worktree` and other commonly duplicated source files
+
+... and then duplicate them on-demand while editing.
+
+Personally, I use `git worktree`s a lot.
+That is, usually, I clone a repo, make a feature branch, check it out into a separate worktree, and work on it there:
+
+```bash
+git clone --origin upstream url/to/repo repo
+cd repo
+git branch feature-branch
+git worktree add feature feature-branch
+cd feature
+# now working on a feature-branch
+# ....
+```
+
+Meanwhile, in another TTY, I check out successive testable revisions and test them in a separate `nix-shell` session
+
+```bash
+cd ~/src/repo
+hash=$(cd ~/src/repo/feature; git rev-parse HEAD)
+git worktree add testing $hash
+cd testing
+nix-shell ./default.nix
+
+# run long-running tests here
+
+# when feature-branch updated lots
+hash=$(cd ~/src/repo/feature; git rev-parse HEAD)
+git checkout $hash
+
+# again, run long-running tests here
+```
+
+which allows me to continue working on `feature-branch` without interruptions while the tests are being run on a frozen worktree, which eliminates a whole class of testing errors.
+With a bit of conscientiousness, it also allows me to compare `feature-branch` to the latest revision that passed all the tests very easily.
+
+Now, this workflow costs almost nothing for small projects, but for Nixpkgs, Firefox, or the Linux Kernel each worktree checkout takes quite a bit of space.
+If you have dozens of feature-branches, then space usage can be quite horrifying.
+
+But `hoardy` and `Emacs` can help!
+
+`Emacs` with `break-hardlink-on-save` variable set to `t` (`M-x customize-variable break-hardlink-on-save`) will always re-create and then `rename` files when writing buffers to disk, always breaking hardlinks.
+I.e., with it enabled, `Emacs` won't be overriding any files in-place, ever.
+This has safety advantages, so that, e.g., power loss won't loose your data even if your `Emacs` happened to be writing out a huge `org-mode` file to disk at that moment.
+Which is nice.
+But enabling that option also allows you to simply `hoardy deduplicate` all source files on your filesystem without care.
+
+That is, I have the above variable set in my `Emacs` config, I run
+
+```bash
+hoardy index ~/src/nixpkgs/* ~/src/firefox/* ~/src/linux/*
+hoardy deduplicate ~/src/nixpkgs/* ~/src/firefox/* ~/src/linux/*
+```
+
+periodically, and let my `Emacs` duplicate files I actually touch, on-demand.
+
+For `Vim`, the docs say, the following setting in `.vimrc` should produce the same effect:
+
+```vimrc
+set backupcopy=no,breakhardlink
+```
+
+but I tried it, and it does not work.
+
+(You can try it yourself:
+
+```bash
+cd /tmp
+echo test > test-file
+ln test-file test-file2
+vim test-file2
+# edit it
+# :wq
+ls -l test-file test-file2
+```
+
+The files should be different, but on my system they stay hardlinked.)
 
 # Quirks and Bugs
 
